@@ -5,3 +5,10 @@ __pycache__/
 logs/
 log_cbo*.txt
 execucao_*.txt
+fila.db
+mapa/
+logs_cliente/
+
+# credenciais (NUNCA versionar)
+.env
+*.env

@@ -1,70 +1,146 @@
-# Automação de preenchimento de CBO no Salux (v1.0)
+# Automação de preenchimento de CBO no Salux
 
-Preenche o campo **CBOS** da aba **Origem** da tela *Manutenção da Conta Paciente* (Salux · Faturamento) para todos os itens de uma conta aberta. **Não salva nada**: a conferência e o salvamento continuam manuais.
+Preenche o campo **CBOS** da aba **Origem** da tela *Manutenção da Conta Paciente* (Salux · Faturamento) para os itens de procedimento de uma conta.
 
-## Como usar
+Existem dois modos de uso:
 
-Requisitos: Windows, Python 3.12, Salux (`faturam.exe`) aberto e logado.
+1. **Modo local (v1.0)** — um painel único que preenche a conta aberta na máquina (`painel_cbo.py`).
+2. **Modo cliente/servidor (branch `dev`)** — um **servidor** com o Salux logado processa uma **fila de contas**; **painéis cliente** (operador e secretárias) enviam contas e recebem o resultado em tempo real. Já funciona completo em **simulação**; com o **Salux real** ainda **não salva** (ver "Estado atual").
+
+> A automação preenche; **toda conta passa por revisão manual**, mesmo quando salva.
+
+---
+
+## Fluxo cliente/servidor
+
+```
+painel_cliente.py  (operador / secretárias)  <--TCP, JSON por linha, token-->  servidor_cbo.py
+                                                                                 ├─ fila + logs (SQLite fila.db)
+                                                                                 └─ worker (1 conta por vez)
+                                                                                      ├─ WorkerSimulado (sem Salux)
+                                                                                      └─ WorkerSalux (Salux real)
+```
+
+1. O **operador** digita o número da conta no painel cliente e envia.
+2. O **servidor** valida (só dígitos, sem duplicata na fila/em processamento) e enfileira.
+3. O **worker** pega uma conta por vez: (login + Faturamento, se preciso) → abre a conta pela consulta do Salux → filtra *Tipo de Item = Procedimento* → preenche os CBOs → **porta de salvamento** → salva ou não.
+4. A cada linha, o servidor envia o log **em tempo real** aos painéis; ao concluir, avisa com o resumo.
+5. A **secretária** confere a conta e clica em **Marcar como REVISADA** (fica registrado quem e quando).
+
+### Como rodar (simulação na mesma máquina)
 
 ```bash
 pip install -r requirements.txt
 ```
 
-1. No Salux, abra a conta e deixe-a na aba **Itens**.
-2. Dê duplo clique em `iniciar_painel.bat` (ou `python painel_cbo.py`).
-3. Clique em **Iniciar automação**, leia as orientações e confirme.
-4. **Não use mouse nem teclado** até o painel avisar que a tela está liberada.
-5. Confira a aba Origem e salve manualmente no Salux.
+```bash
+python painel_servidor.py
+```
 
-Pelo terminal (sem painel): `python preencher_cbo.py [max_itens]`.
+```bash
+python painel_cliente.py
+```
 
-### Regras de preenchimento
-- CBOS **já preenchido** → pula.
-- CBOS vazio → clica na seta do dropdown e escolhe a **primeira opção** da lista.
-- Lista sem opções (sem Prof ou profissional sem CBO vinculado) → registra `ERRO linha N: Campo CBO sem especialidade para preencher` e segue.
-- Se o Salux recusar o CBO ("Código CBO inválido [2]…"), ele limpa o campo; o erro é registrado com a linha.
+(ou `iniciar_servidor.bat` / `iniciar_cliente.bat`). O cliente aceita `--papel operador|secretaria|ambos`, `--usuario NOME` e `--servidor HOST`. Para simular duas pessoas, abra dois clientes com `--usuario` diferentes.
 
-### Erros críticos (a automação para)
-O Salux fechou/travou, aviso do Salux com termos de banco/rede/internet/DataWindow/SQL/sessão (lista em `config.py` → `PALAVRAS_CRITICAS`), quantidade de itens mudou no meio da execução, ou exceção inesperada. O aviso crítico fica aberto na tela, sem a automação clicar nele.
+**Modo do worker** (escolhido no painel do servidor, lido a cada conta):
+- **Simulado** (padrão): sem Salux. O **último dígito da conta** escolhe o cenário: `0` conta não encontrada · `9` erro crítico · `8` 50% ou mais de itens com problema · `7` só erros tolerados · demais: sucesso.
+- **Salux real (não salva)**: faz login (`.env`), abre o Faturamento e processa de verdade. Como o salvamento ainda não está mapeado, **nunca salva**, deixa a conta aberta e **pausa a fila** depois de cada conta: confira/feche a conta no Salux e clique em **Retomar fila**.
+
+### Painel do servidor
+Fila com estados, log ao vivo, clientes conectados. Botões: **Pausar/Retomar fila**, **Parar conta atual**, **Reiniciar fila** (reenfileira todas as contas com falha crítica e retoma). O servidor mostra "PROCESSANDO — NÃO MEXA NA TELA".
+
+### Painel do cliente
+Campo da conta + **Enviar para a fila**, lista da fila, log em tempo real (o mesmo do servidor), aviso ao concluir cada conta, **Marcar como REVISADA**, duplo clique para abrir o log completo da conta. Reconecta sozinho se o servidor cair.
+
+### Estados
+**Conta:** `ENFILEIRADA` · `PROCESSANDO` · `SALVA` · `NAO SALVA` · `CONTA INVALIDA` · `FALHA CRITICA`.
+**Revisão:** `AGUARDANDO REVISAO` (padrão, inclusive nas salvas) · `REVISADA`.
+(Na tela os nomes aparecem sem underline; no banco continuam `NAO_SALVA` etc.)
+
+### Porta de salvamento (`porta.py`)
+- **Não salva** se: 50% ou mais dos itens tiverem problema **não tolerado**; processamento incompleto; erro crítico; erro no Salux ou no servidor.
+- **Tolerados** (não impedem salvar, mas ficam registrados): campo CBO vazio/sem opção na lista e Prof = 1 (Hospital Renascença). *Ler a coluna Prof ainda não foi provado*: por ora todo "Campo CBO sem especialidade" é tolerado.
+- Falha crítica **pausa a fila** (use **Reiniciar fila** depois de resolver a causa).
 
 ### Logs
-- Painel: log ao vivo com cores (info, sucesso, aviso, erro, crítico).
-- `logs/execucao_<data>.txt`: todas as mensagens do painel.
-- `log_cbo.txt`: uma linha por item (`PREENCHIDO`, `PULADO…`) + resumo + tempo.
-- `log_cbo_resumo_<data>.txt`: resumo por faixas de itens (incluídos, já tinham, sem opção, inválidos, não processados) + erros por linha.
-- Os itens são identificados pelo **número da linha** (a descrição do procedimento não é legível pela automação).
+- **Servidor:** SQLite `fila.db` (fonte da verdade: contas e eventos) + `logs/conta_<n>_<data>.txt` por conta.
+- **Cliente que pediu a conta:** `logs_cliente/conta_<n>_<data>.txt` com **conteúdo idêntico** ao do servidor.
+- Modo local (v1.0): `logs/execucao_<data>.txt`, `log_cbo.txt`, `log_cbo_resumo_<data>.txt`.
+
+---
+
+## Login automático e abertura do Faturamento (`salux_sessao.py`)
+
+- `garantir_faturamento()` usa o Faturamento já aberto ou sobe `portal.exe` → login → azulejo **Faturamento**.
+- O login lê **`USERNAME` e `SENHA` do arquivo `.env`** (lido direto do arquivo, pois `USERNAME` existe no Windows). Os valores **nunca são impressos nem gravados em log**. O `.env` está no `.gitignore`; restrinja a permissão dele ao usuário do Windows que roda a automação (em produção, o ideal é o Gerenciador de Credenciais do Windows).
+- Sem `SENHA` no `.env` (ou com `--espera-login`), o script espera uma pessoa digitar o login.
+- As posições dos campos de login e dos cliques do portal vêm do mapeamento da tela e dependem da escala/resolução (ver `config.py` e `salux_sessao.py`).
+
+## Abrir a conta pelo número e filtrar procedimentos (`cbo_core.py`)
+
+- **Abrir conta:** menu *Movimento → Manutenção da Conta Paciente (direto)* → botão de consulta (clique real) → *Cta = FIA*, *Sit. Cta = Aberta*, digita o número → botão executar a consulta. Confere que a conta carregou; avisos do Salux (conta não encontrada, em uso por outro usuário…) viram `CONTA INVALIDA`.
+- **Filtro:** botão direito na grade de itens → *Filtrar* → *Tipo de Item = Procedimento* → OK; depois segue o fluxo de preenchimento.
+- **Conta bloqueada:** se uma execução for interrompida com a conta aberta, o Salux mantém o bloqueio ("Informação está sendo atualizada pelo usuário…"). Sempre feche a conta ao terminar.
+
+## Modo local (v1.0)
+
+```bash
+python painel_cbo.py
+```
+O painel agora tem campo **Nº da conta**, **Máx. itens (teste)** e a opção de **entrar no Salux automaticamente** (login do `.env`). Sem número de conta, usa a conta já aberta na aba Itens. Pelo terminal: `python preencher_cbo.py [--login | --espera-login] [--conta N] [max_itens]`. **Não salva nada.**
+
+### Regras de preenchimento
+- CBOS **já preenchido** → pula. CBOS vazio → clica na seta e escolhe a **primeira opção**.
+- Lista sem opções (sem Prof ou profissional sem CBO vinculado) → `ERRO linha N: Campo CBO sem especialidade para preencher` e segue.
+- Se o Salux recusar o CBO ("Código CBO inválido [2]…"), ele limpa o campo; o erro é registrado com a linha.
+- **Erros críticos (a automação para):** Salux fechou/travou, aviso com termos de banco/rede/internet/DataWindow/SQL/sessão (`config.PALAVRAS_CRITICAS`), quantidade de itens mudou no meio, exceção inesperada.
+
+---
 
 ## Arquivos
 
 | Arquivo | Função |
 |---|---|
-| `cbo_core.py` | Núcleo: navegação no Salux, classificação de erros, logs |
-| `painel_cbo.py` | Painel (tkinter) com botão, orientações, log e aviso de conclusão |
-| `preencher_cbo.py` | Uso pelo terminal (chama o núcleo) |
-| `config.py` | Parâmetros: janela, posições das abas, largura da coluna CBOS, palavras de erro crítico |
-| `iniciar_painel.bat` | Atalho para abrir o painel |
+| `cbo_core.py` | Núcleo: abrir conta, filtro, navegação, preenchimento, classificação de erros |
+| `salux_sessao.py` | Portal, login (`.env`) e abertura do Faturamento |
+| `servidor_cbo.py` | Servidor: rede, fila, worker serial, logs, reiniciar fila |
+| `workers.py` | `WorkerSimulado` e `WorkerSalux` |
+| `porta.py` | Regra de salvamento (tolerados vs. problemas, limite de 50%) |
+| `banco.py` | SQLite: contas e eventos |
+| `protocolo.py` | Mensagens JSON por linha e nomes legíveis de estado |
+| `cliente_rede.py` | Conexão do cliente com reconexão automática |
+| `painel_servidor.py` / `painel_cliente.py` | Painéis tkinter do servidor e do cliente |
+| `painel_cbo.py` / `preencher_cbo.py` | Modo local (painel e terminal) |
+| `mapear_tela.py` | Mapeador somente-leitura de telas do Salux (`observar` / `snap`) |
+| `teste_fluxo_simulado.py` | Teste automático do fluxo cliente/servidor (sem Salux) |
+| `config.py` | Parâmetros: janela, posições, portal, servidor/porta/token |
+| `iniciar_*.bat` | Atalhos |
 
-## Histórico do que foi feito até a v1.0
+Teste automático (sem Salux nem interface): `python teste_fluxo_simulado.py` (fila, duplicatas, token, cenários, pausa em falha crítica, reiniciar fila, revisão e log idêntico nos dois lados).
 
-1. **Mapeamento da tela.** O Salux é **PowerBuilder 32 bits**. Só o backend `win32` do pywinauto enxerga a tela (UIA vê quase nada). As abas Itens/Origem são painéis dentro do controle `PBTabControl32_100`. A coluna **CBOS** é uma célula de **DataWindow**: o Windows só expõe um `Edit` temporário para a célula ativa.
-2. **Navegação.** Cliques do mouse na grade não trocam de linha, mas as **setas ↑/↓ na aba Itens** sim; o rótulo "Item N de M" informa a linha ativa. A mesma linha fica ativa ao abrir a aba Origem. O editor do CBOS é achado pela **largura** (a grade pode estar rolada na horizontal).
-3. **Escolha do CBO.** A tecla ↓ só funcionava às vezes (e já gerou leitura enganosa). O que funciona de forma repetível é **clicar com o mouse real** na seta do dropdown e na primeira opção da lista. A lista com mais de uma opção é mais alta; um filtro de altura que só aceitava uma linha fazia o script achar que não havia opções (corrigido).
-4. **Armadilhas encontradas.**
-   - **Tab** na última célula da última linha **cria um item novo em branco**; o script nunca avança além do CBOS.
-   - O Salux valida o CBO **ao sair da célula** (aviso "Código CBO inválido [2]" e limpeza do campo); o aviso é atribuído à linha anterior.
-   - Teclas enviadas à grade dependem de **foco real**; o editor da Origem guarda o teclado mesmo com a aba trocada.
-   - Leitura do texto do editor pode vir de outra linha: há travas (linha ativa, total de itens).
-5. **Resultados dos testes (contas reais, nada salvo pela automação).** Conta com 152 itens e conta com 101 itens (**8 min 10 s**) processadas sem aviso de CBO inválido; itens já preenchidos foram preservados.
-6. **Painel + tratamento de erros (v1.0).** Interface de um botão com orientação "não mexer na tela", log ao vivo, erros por linha, parada em erro crítico, logs em texto e aviso de conclusão com liberação da tela. Testado sem tocar no Salux: classificação de avisos, erro crítico simulado e painel com automação falsa. **A execução completa do painel contra o Salux ainda precisa ser validada.**
+## Mudanças nesta versão (branch `dev`, desde a v1.0)
 
-## Limitações conhecidas
-- Depende de **sessão de Windows interativa e desbloqueada** (controla mouse e teclado reais; não roda como serviço nem com RDP desconectado).
-- Posições das abas, largura da coluna CBOS e cliques relativos dependem de **escala de tela/fonte/layout**; uma atualização do Salux pode quebrar a automação (recalibrar em `config.py`).
-- Não distingue "Prof vazio" de "Prof sem CBO vinculado" (ambos viram erro de linha).
-- A conta precisa estar **aberta na aba Itens**; abrir a conta pelo número não está implementado.
-- Texto lido do editor pode ser enganoso; **confira a aba Origem antes de salvar**.
+- Abrir a conta pelo número (consulta do Salux) e filtrar procedimentos.
+- Login automático e abertura do Faturamento pelo portal; `.env` (credenciais) fora do git.
+- Painel local com nº da conta, limite de itens e login automático.
+- **Arquitetura cliente/servidor:** fila em SQLite, worker serial, push em tempo real, painéis do servidor e do cliente, revisão manual, logs idênticos no servidor e no cliente, **Reiniciar fila**.
+- Porta de salvamento e estados de conta/revisão; worker simulado para testar o fluxo inteiro.
+- Mapeador de telas (`mapear_tela.py`).
 
-## Próximos passos (ideias)
-- Rodar numa máquina servidora com usuário/permissões dedicados no Salux (checklist: sessão interativa com logon automático, resolução e escala fixas, piloto com conferência de todas as linhas).
-- Reduzir a dependência de pixels (seleção de aba por mensagem, coluna CBOS pelo cabeçalho, autoteste de layout ao iniciar).
-- Avaliar com o fornecedor do Salux preenchimento automático do CBO, API ou importação em lote.
+## Estado atual e limitações
+
+- **Salvar no Salux não está implementado.** Modo Salux real: a conta fica aberta e a fila pausa a cada conta. Falta mapear o botão de salvar e o fechamento da conta (o Salux pergunta algo ao fechar com alterações) para processar várias contas seguidas.
+- O **login automático** foi corrigido (posições dos campos) mas **ainda não foi validado de ponta a ponta**.
+- **Prof = 1** ainda não é lido (coluna Prof); por ora, todo CBO sem opção é tolerado.
+- Servidor: **token fixo** em `config.py` e rede só local (`127.0.0.1`). Antes de produção: trocar o token, liberar o bind na rede interna, usuário dedicado no Salux, sessão do Windows interativa e desbloqueada (logon automático, resolução e escala fixas; não roda como serviço nem com RDP desconectado).
+- Posições de cliques dependem de escala de tela/layout; uma atualização do Salux pode exigir recalibrar.
+- Confira sempre a aba Origem: o texto lido do editor pode ser enganoso.
+
+## Histórico técnico (v1.0)
+
+1. **Mapeamento.** O Salux é **PowerBuilder 32 bits**; só o backend `win32` do pywinauto enxerga a tela. As abas Itens/Origem ficam em `PBTabControl32_100`; a coluna **CBOS** é célula de DataWindow (só a célula ativa expõe um `Edit`).
+2. **Navegação.** Cliques na grade não trocam de linha, mas as **setas ↑/↓ na aba Itens** sim; o rótulo "Item N de M" informa a linha. O editor do CBOS é achado pela **largura**.
+3. **Escolha do CBO.** A tecla ↓ era instável; funciona **clique real** na seta do dropdown e na primeira opção. (Um filtro de altura errado fazia listas com várias opções parecerem vazias — corrigido.)
+4. **Armadilhas.** **Tab** na última célula cria item em branco (o script nunca avança além do CBOS); o Salux valida o CBO ao **sair da célula** (aviso atribuído à linha anterior); teclas dependem de foco real; leitura do editor pode vir de outra linha (travas de linha ativa e total de itens).
+5. **Testes reais (nada salvo pela automação).** Contas de 152 e 101 itens (8 min 10 s) sem CBO inválido; itens já preenchidos preservados.

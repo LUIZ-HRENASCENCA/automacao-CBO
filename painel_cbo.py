@@ -16,7 +16,8 @@ import config
 
 ORIENTACAO = (
     "ANTES DE INICIAR\n\n"
-    "  •  Deixe a conta aberta no Salux, na aba ITENS.\n\n"
+    "  •  Com o login automático, o painel abre o Salux, entra e abre a conta.\n"
+    "  •  Sem o número da conta, usa a conta já aberta no Salux (aba ITENS).\n\n"
     "NÃO MEXA NA TELA após iniciar:\n"
     "  •  Não use o mouse nem o teclado.\n"
     "  •  Não clique no Salux nem em outras janelas.\n"
@@ -54,6 +55,19 @@ class Painel:
 
         self.faixa = tk.Label(raiz, text="", font=("Segoe UI", 11, "bold"), pady=6)
         self.faixa.pack(fill="x", pady=8)
+
+        campos = tk.Frame(raiz, bg="#f4f4f4")
+        campos.pack(pady=(0, 6))
+        tk.Label(campos, text="Nº da conta:", bg="#f4f4f4", font=("Segoe UI", 10)).grid(row=0, column=0, padx=4)
+        self.v_conta = tk.StringVar()
+        tk.Entry(campos, textvariable=self.v_conta, width=12, font=("Segoe UI", 11)).grid(row=0, column=1, padx=4)
+        tk.Label(campos, text="Máx. itens (teste):", bg="#f4f4f4", font=("Segoe UI", 10)).grid(row=0, column=2, padx=(14, 4))
+        self.v_limite = tk.StringVar()
+        tk.Entry(campos, textvariable=self.v_limite, width=5, font=("Segoe UI", 11)).grid(row=0, column=3, padx=4)
+        self.v_login = tk.BooleanVar(value=True)
+        tk.Checkbutton(campos, text="Entrar no Salux automaticamente (login do .env) e abrir o Faturamento",
+                       variable=self.v_login, bg="#f4f4f4", font=("Segoe UI", 9)
+                       ).grid(row=1, column=0, columnspan=4, pady=(4, 0))
 
         botoes = tk.Frame(raiz, bg="#f4f4f4")
         botoes.pack()
@@ -116,6 +130,16 @@ class Painel:
     def clicou_iniciar(self):
         if self.rodando:
             return
+        self.conta = self.v_conta.get().strip() or None
+        if self.conta and not self.conta.isdigit():
+            messagebox.showerror("Conta inválida", "Digite só números no campo da conta.", parent=self.raiz)
+            return
+        lim = self.v_limite.get().strip()
+        if lim and not lim.isdigit():
+            messagebox.showerror("Limite inválido", "Máx. itens deve ser um número.", parent=self.raiz)
+            return
+        self.limite = int(lim) if lim else None
+        self.fazer_login = self.v_login.get()
         if not self.confirmar():
             return
         pasta = Path(__file__).resolve().parent / config.PASTA_LOGS
@@ -178,7 +202,17 @@ class Painel:
         def log(nivel, msg):
             self.fila.put((nivel, msg))
         try:
-            res = cbo_core.executar(log, self.parar)
+            if self.fazer_login:
+                import salux_sessao
+                try:
+                    log("info", "Preparando o Salux (portal, login e Faturamento)...")
+                    salux_sessao.garantir_faturamento(lambda m: log("info", m))
+                    log("ok", "Faturamento aberto.")
+                except Exception as e:
+                    log("critico", f"ERRO CRITICO ao entrar no Salux: {e}")
+                    self.fila.put(("fim", cbo_core.Resultado(estado="CRITICO", mensagem=str(e))))
+                    return
+            res = cbo_core.executar(log, self.parar, limite=self.limite, conta=self.conta)
         except Exception as e:  # nao deveria ocorrer: executar trata tudo
             log("critico", f"ERRO CRITICO inesperado: {type(e).__name__}: {e}")
             res = cbo_core.Resultado(estado="CRITICO", mensagem=str(e))

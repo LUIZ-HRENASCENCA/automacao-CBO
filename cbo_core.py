@@ -104,6 +104,16 @@ def posicao(janela):
     return 0, 0
 
 
+def _janelas(app):
+    """app.windows() tolerante: janelas temporarias (dicas) podem sumir durante a listagem."""
+    for _ in range(4):
+        try:
+            return app.windows()
+        except Exception:
+            time.sleep(0.2)
+    return []
+
+
 def ler_avisos(app):
     """Le e fecha os avisos do Salux (#32770). Devolve [(texto, classe)].
 
@@ -111,7 +121,7 @@ def ler_avisos(app):
     """
     achados = []
     for _ in range(5):
-        dlgs = [w for w in app.windows() if w.class_name().startswith("#32770")]
+        dlgs = [w for w in _janelas(app) if w.class_name().startswith("#32770")]
         if not dlgs:
             break
         d = dlgs[0]
@@ -189,7 +199,7 @@ def ir_para_cbos(janela, linha):
 
 
 def _popups(app, topo):
-    return [w for w in app.windows()
+    return [w for w in _janelas(app)
             if w.class_name() == "pbdw" and w.is_visible()
             and w.rectangle().height() < 400 and w.rectangle().top > topo]
 
@@ -218,6 +228,185 @@ def escolher_primeira(app, janela, ed):
         time.sleep(0.4)
     e = editor_ativo(janela)
     return e.window_text().strip() if e else ""
+
+
+# ---------------------------------------------------------------- abrir/fechar conta
+
+
+class ContaInvalida(Exception):
+    """Conta nao encontrada, bloqueada, em uso ou diferente da pedida (nao e erro critico)."""
+
+
+TITULO_CONTA = "Manutenção da Conta Paciente"
+
+
+def janela_conta(janela):
+    """Janela filha 'Manutencao da Conta Paciente' visivel, ou None."""
+    for w in janela.descendants(class_name="FNWND3"):
+        if w.is_visible() and w.window_text() == TITULO_CONTA:
+            return w
+    return None
+
+
+def _campo_numero(conta):
+    """PBEDIT 'Numero da Conta' (mapeado: topo da janela da conta, ~90 px de largura)."""
+    topo = conta.rectangle().top
+    cands = [e for e in conta.descendants(class_name="PBEDIT")
+             if e.is_visible() and 25 < e.rectangle().top - topo < 60
+             and 70 <= e.rectangle().width() <= 110]
+    return min(cands, key=lambda e: e.rectangle().left) if cands else None
+
+
+def _conta_carregada(janela):
+    """Com a conta carregada o botao CpCusto fica habilitado (em consulta fica cinza)."""
+    for b in janela.descendants(class_name="Button"):
+        if b.is_visible() and b.window_text() == "CpCusto":
+            return b.is_enabled()
+    return False
+
+
+def abrir_conta(app, janela, numero, espera=20):
+    """Abre a conta pelo modo consulta do Salux. Nao altera nada na conta.
+
+    Fluxo mapeado: Movimento > 'Manutencao da Conta Paciente (direto)' (a janela abre
+    JA em modo consulta, com o foco no Numero da Conta) -> digita o numero -> Tab:
+    Cta, digitar 'F' (FIA) -> Tab, Tab: Sit. Cta, digitar 'Aberta' -> CLIQUE REAL no
+    botao 'Executar consulta' da barra (clique por mensagem nao executa).
+    Nunca executa a consulta sem o numero conferido (consulta em branco abre a 1a conta).
+    """
+    numero = str(numero).strip()
+    if not numero.isdigit():
+        raise ContaInvalida(f"Numero de conta invalido: {numero!r}")
+    if janela_conta(janela) is not None:
+        raise ErroCritico("Ja existe uma conta aberta no Salux; feche-a antes de abrir outra.")
+    janela.set_focus()
+    time.sleep(0.4)
+    janela.menu_select("Movimento->Manutenção da Conta Paciente (direto)")
+    conta, fim = None, time.time() + espera
+    while time.time() < fim and conta is None:
+        time.sleep(0.5)
+        conta = janela_conta(janela)
+    if conta is None:
+        raise ErroCritico("A tela 'Manutencao da Conta Paciente' nao abriu pelo menu.")
+    campo, fim = None, time.time() + espera
+    while time.time() < fim and campo is None:
+        time.sleep(0.5)
+        campo = _campo_numero(conta)
+    if campo is None:
+        raise ErroCritico("Campo 'Numero da Conta' nao encontrado na tela da conta.")
+    time.sleep(0.8)
+    janela.set_focus()
+    campo.type_keys(numero, with_spaces=False)
+    time.sleep(0.4)
+    digitado = re.sub(r"\D", "", campo.window_text())
+    if digitado != numero:  # nunca executar a consulta com o numero errado ou em branco
+        raise ErroCritico(f"Numero digitado no Salux ({digitado or 'vazio'}) difere do pedido ({numero}).")
+    janela.type_keys("{TAB}F{TAB}{TAB}Aberta", with_spaces=False)  # Cta=FIA, Sit. Cta=Aberta
+    time.sleep(0.6)
+    barra = [c for c in visiveis(janela, "FNFIXEDBAR")][0]
+    janela.set_focus()
+    time.sleep(0.4)
+    barra.click_input(coords=config.POS_BOTAO_CONSULTA)  # executar consulta (clique real)
+    fim = time.time() + espera
+    while time.time() < fim:
+        time.sleep(0.6)
+        for texto, classe in ler_avisos(app):
+            if classe == "critico":
+                raise ErroCritico(f"Aviso critico do Salux ao abrir a conta: {texto}")
+            raise ContaInvalida(f"Salux avisou ao abrir a conta {numero}: {texto}")
+        verificar_salux(app, janela)
+        if _conta_carregada(janela):
+            return conta
+    raise ContaInvalida(f"A conta {numero} nao carregou em {espera}s (inexistente, bloqueada ou nao esta Aberta/FIA).")
+
+
+def _menu_contexto(app):
+    return [w for w in _janelas(app) if w.class_name() == "#32768" and w.is_visible()]
+
+
+def _tela_filtro(app):
+    for w in _janelas(app):
+        if w.class_name() == "FNWNS3" and w.window_text() == "Tela de Filtro" and w.is_visible():
+            return w
+    return None
+
+
+def filtrar_procedimentos(app, janela, espera=12):
+    """Aba Itens > botao direito na grade > Filtrar > Tipo de Item = Procedimento > OK.
+
+    Mapeado: o menu de contexto tem 'Ordenar' e 'Filtrar'; a 'Tela de Filtro' tem o
+    checkbox 'Tipo de Item' (habilita o dropdown), dropdown com Diaria / Kit Faturamento /
+    Procedimento / Produto e o botao OK. So envia a tecla de atalho do menu ('f') quando
+    o menu de contexto esta realmente aberto (senao digitaria numa celula de item).
+    Devolve (itens_antes, itens_depois).
+    """
+    antes = posicao(janela)[1]
+    g = grade(janela)
+    r = g.rectangle()
+    x, y = r.left + 300, r.top + 60  # area das linhas de itens
+    menu = []
+    for _ in range(3):
+        janela.set_focus()
+        time.sleep(0.4)
+        mouse.move(coords=(x, y))
+        time.sleep(0.2)
+        mouse.right_click(coords=(x, y))
+        time.sleep(1.0)
+        menu = _menu_contexto(app)
+        if menu:
+            break
+    if not menu:
+        raise ErroCritico("O menu de contexto (Ordenar/Filtrar) nao abriu na grade de itens.")
+    janela.type_keys("f")  # atalho de '&Filtrar'
+    dlg, fim = None, time.time() + espera
+    while time.time() < fim and dlg is None:
+        time.sleep(0.5)
+        dlg = _tela_filtro(app)
+    if dlg is None:
+        raise ErroCritico("A 'Tela de Filtro' nao abriu.")
+    chk = [c for c in dlg.children(class_name="Button") if c.window_text() == "Tipo de Item"][0]
+    combo = dlg.children(class_name="ComboBox")[0]
+    if chk.get_check_state() == 0:
+        chk.click()
+        time.sleep(0.6)
+    if not combo.is_enabled():
+        raise ErroCritico("O filtro 'Tipo de Item' nao foi marcado.")
+    combo.select("Procedimento")
+    time.sleep(0.5)
+    if combo.selected_text() != "Procedimento":
+        raise ErroCritico(f"Filtro de tipo ficou em {combo.selected_text()!r}, esperado 'Procedimento'.")
+    [c for c in dlg.children(class_name="Button") if c.window_text() == "&OK"][0].click()
+    fim = time.time() + espera
+    while time.time() < fim and _tela_filtro(app) is not None:
+        time.sleep(0.5)
+    if _tela_filtro(app) is not None:
+        raise ErroCritico("A 'Tela de Filtro' nao fechou apos o OK.")
+    time.sleep(1.5)
+    for texto, classe in ler_avisos(app):
+        if classe == "critico":
+            raise ErroCritico(f"Aviso critico do Salux ao filtrar: {texto}")
+        raise ContaInvalida(f"Salux avisou ao filtrar os itens: {texto}")
+    return antes, posicao(janela)[1]
+
+
+def fechar_conta(app, janela, espera=15):
+    """Fecha a janela da conta (WM_CLOSE; nunca o botao 'Fechar Conta', que fecha a conta de faturamento).
+
+    Se o Salux perguntar algo (ex.: salvar alteracoes), NAO responde: levanta ErroCritico.
+    """
+    conta = janela_conta(janela)
+    if conta is None:
+        return
+    conta.close()
+    fim = time.time() + espera
+    while time.time() < fim:
+        time.sleep(0.5)
+        avisos = ler_avisos(app)
+        if avisos:
+            raise ErroCritico(f"O Salux perguntou algo ao fechar a conta: {avisos[0][0]}")
+        if janela_conta(janela) is None:
+            return
+    raise ErroCritico("A tela da conta nao fechou.")
 
 
 # ---------------------------------------------------------------- logs em arquivo
@@ -270,12 +459,14 @@ def resumo_contagem(res):
 # ---------------------------------------------------------------- execucao
 
 
-def executar(log, parar=None, limite=None):
+def executar(log, parar=None, limite=None, conta=None):
     """Percorre os itens da conta aberta e preenche o CBOS.
 
     log(nivel, msg): nivel em info | ok | aviso | erro | critico.
     parar: threading.Event; se acionado, termina apos a linha atual.
     limite: maximo de itens (None = todos).
+    conta: numero da conta a abrir pela consulta do Salux (None = usa a conta ja aberta).
+    Nunca salva e nunca fecha a conta: a revisao e o salvamento sao manuais.
     """
     parar = parar or threading.Event()
     res = Resultado()
@@ -314,19 +505,26 @@ def executar(log, parar=None, limite=None):
             janela = app.window(title_re=config.TITULO_APP).wrapper_object()
         except Exception:
             raise ErroCritico("Salux (faturam.exe) nao encontrado. Abra o Faturamento.")
+        janela.set_focus()
+        time.sleep(0.4)
+        tratar_avisos(app, None, 0)
+        if conta:
+            log("info", f"Abrindo a conta {conta} pela consulta do Salux (Cta=FIA, Sit. Cta=Aberta)...")
+            abrir_conta(app, janela, conta)
+            log("ok", f"Conta {conta} aberta.")
         abas = visiveis(janela, config.CLASSE_ABAS)
         if not abas:
             raise ErroCritico("A tela 'Manutencao da Conta Paciente' nao esta aberta.")
         abas = abas[0]
-
-        janela.set_focus()
-        time.sleep(0.4)
-        tratar_avisos(app, None, 0)
         abas.click(coords=config.POS_ABA_ITENS)
         time.sleep(1.0)
-        total = posicao(janela)[1]
-        if total == 0:
+        if posicao(janela)[1] == 0:
             raise ErroCritico("Nenhum item encontrado na conta aberta (confira se esta na aba Itens).")
+        log("info", "Filtrando os itens: Tipo de Item = Procedimento...")
+        antes_f, total = filtrar_procedimentos(app, janela)
+        log("ok", f"Filtro aplicado: {antes_f} itens na conta, {total} procedimentos.")
+        if total == 0:
+            raise ContaInvalida("A conta nao tem itens do tipo Procedimento.")
         res.total = total
         n = min(total, limite) if limite else total
         log("info", f"Conta com {total} itens; tratando {n}.")
@@ -385,6 +583,10 @@ def executar(log, parar=None, limite=None):
         tratar_avisos(app, anterior, n)
         abas.click(coords=config.POS_ABA_ORIGEM)
         res.estado = "CONCLUIDO_COM_ERROS" if res.erros else "CONCLUIDO"
+    except ContaInvalida as e:
+        res.estado = "CONTA_INVALIDA"
+        res.mensagem = str(e)
+        log("erro", f"ERRO: conta nao aberta - {e}")
     except Interrompido:
         res.estado = "INTERROMPIDO"
         res.mensagem = "Interrompido pelo operador."
