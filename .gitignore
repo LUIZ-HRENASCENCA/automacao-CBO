@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# logs de execucao (podem conter dados da operacao)
+logs/
+log_cbo*.txt
+execucao_*.txt
