@@ -27,6 +27,14 @@ painel_cliente.py  (operador / secretárias)  <--TCP, JSON por linha, token-->  
 4. A cada linha, o servidor envia o log **em tempo real** aos painéis; ao concluir, avisa com o resumo.
 5. A **secretária** confere a conta e clica em **Marcar como REVISADA** (fica registrado quem e quando).
 
+### Homologação com duas máquinas (branch `homolog`)
+
+O **servidor** roda a partir do código na máquina com o Salux; o **cliente** é instalado em outra máquina por um **executável** (PyInstaller, sem Python). Roteiro completo, testes e solução de problemas em [`docs/HOMOLOGACAO.md`](docs/HOMOLOGACAO.md).
+
+- **Gerar o pacote do cliente:** `python empacotar_cliente.py` (ou `empacotar_cliente.bat`) → `dist\PainelCliente_<versao>.zip`.
+- **Servidor:** escuta em `0.0.0.0:8765`. O **token** é gerado na primeira execução (`servidor_config.json`) e exibido no topo do painel, com botão **Copiar token**. O token é a senha compartilhada que o servidor exige de cada painel cliente (não é a senha do Salux).
+- **Cliente:** tela **Configurar servidor** (IP/endereço — padrão `10.10.10.249` —, porta, token, usuário e papel) com **Testar conexão**; salva em `cliente_config.json` ao lado do `.exe`. Abre sozinha na primeira execução; os argumentos `--servidor/--porta/--token/--usuario/--papel` sobrepõem o arquivo.
+
 ### Como rodar (simulação na mesma máquina)
 
 ```bash
@@ -41,7 +49,7 @@ python painel_servidor.py
 python painel_cliente.py
 ```
 
-(ou `iniciar_servidor.bat` / `iniciar_cliente.bat`). O cliente aceita `--papel operador|secretaria|ambos`, `--usuario NOME` e `--servidor HOST`. Para simular duas pessoas, abra dois clientes com `--usuario` diferentes.
+(ou `iniciar_servidor.bat` / `iniciar_cliente.bat`). Na primeira execução do cliente, informe `127.0.0.1` e o token exibido no servidor. Para simular duas pessoas, abra dois clientes com `--usuario` diferentes.
 
 **Modo do worker** (escolhido no painel do servidor, lido a cada conta):
 - **Simulado** (padrão): sem Salux. O **último dígito da conta** escolhe o cenário: `0` conta não encontrada · `9` erro crítico · `8` 50% ou mais de itens com problema · `7` só erros tolerados · demais: sucesso.
@@ -109,8 +117,12 @@ O painel agora tem campo **Nº da conta**, **Máx. itens (teste)** e a opção d
 | `porta.py` | Regra de salvamento (tolerados vs. problemas, limite de 50%) |
 | `banco.py` | SQLite: contas e eventos |
 | `protocolo.py` | Mensagens JSON por linha e nomes legíveis de estado |
-| `cliente_rede.py` | Conexão do cliente com reconexão automática |
-| `painel_servidor.py` / `painel_cliente.py` | Painéis tkinter do servidor e do cliente |
+| `painel_servidor.py` / `painel_cliente.py` | Painéis tkinter do servidor e do cliente (tela de configuração do servidor) |
+| `cliente_config.py` / `servidor_config.py` | Configuração do cliente (JSON ao lado do .exe) e do servidor (bind, porta, token gerado) |
+| `cliente_rede.py` | Conexão com reconexão, `testar_conexao` e `reconfigurar` |
+| `empacotar_cliente.py` / `pacote_cliente/` | Gera o zip do cliente (PyInstaller) e arquivos que vão junto |
+| `versao.py` | Versão do pacote |
+| `docs/HOMOLOGACAO.md` | Roteiro de instalação e teste em duas máquinas |
 | `painel_cbo.py` / `preencher_cbo.py` | Modo local (painel e terminal) |
 | `mapear_tela.py` | Mapeador somente-leitura de telas do Salux (`observar` / `snap`) |
 | `teste_fluxo_simulado.py` | Teste automático do fluxo cliente/servidor (sem Salux) |
@@ -119,7 +131,14 @@ O painel agora tem campo **Nº da conta**, **Máx. itens (teste)** e a opção d
 
 Teste automático (sem Salux nem interface): `python teste_fluxo_simulado.py` (fila, duplicatas, token, cenários, pausa em falha crítica, reiniciar fila, revisão e log idêntico nos dois lados).
 
-## Mudanças nesta versão (branch `dev`, desde a v1.0)
+## Mudanças na branch `homolog` (sobre a `dev`)
+
+- Tela **Configurar servidor** no cliente (IP/endereço, porta, token, usuário, papel; Testar conexão; reconexão sem reiniciar).
+- Servidor escuta na rede (`0.0.0.0`), com **token próprio gerado** e exibido no painel, lista de clientes conectados (usuário, papel, versão).
+- Cliente empacotado em **executável** (PyInstaller) + zip pronto para instalar; roteiro em `docs/HOMOLOGACAO.md`.
+- Testes novos: configurações, `testar_conexao`, `reconfigurar`.
+
+## Mudanças da branch `dev` (desde a v1.0)
 
 - Abrir a conta pelo número (consulta do Salux) e filtrar procedimentos.
 - Login automático e abertura do Faturamento pelo portal; `.env` (credenciais) fora do git.
@@ -133,7 +152,7 @@ Teste automático (sem Salux nem interface): `python teste_fluxo_simulado.py` (f
 - **Salvar no Salux não está implementado.** Modo Salux real: a conta fica aberta e a fila pausa a cada conta. Falta mapear o botão de salvar e o fechamento da conta (o Salux pergunta algo ao fechar com alterações) para processar várias contas seguidas.
 - O **login automático** foi corrigido (posições dos campos) mas **ainda não foi validado de ponta a ponta**.
 - **Prof = 1** ainda não é lido (coluna Prof); por ora, todo CBO sem opção é tolerado.
-- Servidor: **token fixo** em `config.py` e rede só local (`127.0.0.1`). Antes de produção: trocar o token, liberar o bind na rede interna, usuário dedicado no Salux, sessão do Windows interativa e desbloqueada (logon automático, resolução e escala fixas; não roda como serviço nem com RDP desconectado).
+- Servidor: token em arquivo (texto) e tráfego **sem TLS** (só rede interna). Antes de produção: usuário dedicado no Salux, sessão do Windows interativa e desbloqueada (logon automático, resolução e escala fixas; não roda como serviço nem com RDP desconectado) e IP fixo para o servidor.
 - Posições de cliques dependem de escala de tela/layout; uma atualização do Salux pode exigir recalibrar.
 - Confira sempre a aba Origem: o texto lido do editor pode ser enganoso.
 

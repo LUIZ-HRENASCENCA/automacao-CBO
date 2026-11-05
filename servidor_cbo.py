@@ -13,6 +13,7 @@ from pathlib import Path
 import config
 import porta
 import protocolo
+import servidor_config
 from protocolo import legivel
 from banco import Banco, agora
 
@@ -21,12 +22,15 @@ CAMPOS_FILA = ("id", "conta", "solicitante", "estado", "revisao", "salvou", "mot
 
 
 class Servidor:
-    def __init__(self, banco, obter_worker, on_log=None, bind=None, porta_tcp=None, pasta_logs=None):
+    def __init__(self, banco, obter_worker, on_log=None, bind=None, porta_tcp=None, pasta_logs=None,
+                 token=None):
+        cfg = servidor_config.carregar() if None in (bind, porta_tcp, token) else {}
         self.db = banco
         self.obter_worker = obter_worker      # callable -> worker atual (permite trocar o modo)
         self.on_log = on_log or (lambda *a: None)   # on_log(id, conta, nivel, hora, msg)
-        self.bind = bind or config.SERVIDOR_BIND
-        self.porta = porta_tcp or config.SERVIDOR_PORTA
+        self.bind = bind or cfg.get("bind")
+        self.porta = porta_tcp or cfg.get("porta")
+        self.token = token or cfg.get("token")
         self.pasta_logs = Path(pasta_logs or Path(__file__).resolve().parent / config.PASTA_LOGS)
         self.clientes = {}
         self.pausada = False
@@ -86,19 +90,24 @@ class Servidor:
         self._bc_fila()
         return len(falhas)
 
+    def lista_clientes(self):
+        """Clientes conectados agora (exclui testes de conexao)."""
+        return [dict(i) for i in list(self.clientes.values()) if i.get("papel") != "teste"]
+
     @property
     def n_clientes(self):
-        return len(self.clientes)
+        return len(self.lista_clientes())
 
     # ------------------------------------------------------------ rede
     async def _cliente(self, reader, writer):
         try:
             msg = await asyncio.wait_for(protocolo.ler(reader), 10)
-            if not msg or msg.get("tipo") != "hello" or msg.get("token") != config.TOKEN:
+            if not msg or msg.get("tipo") != "hello" or msg.get("token") != self.token:
                 writer.write(protocolo.codificar({"tipo": "erro", "msg": "autenticacao recusada"}))
                 await writer.drain()
                 return
-            info = {"usuario": str(msg.get("usuario", "?"))[:40], "papel": msg.get("papel", "ambos")}
+            info = {"usuario": str(msg.get("usuario", "?"))[:40], "papel": msg.get("papel", "ambos"),
+                    "versao": str(msg.get("versao", "?"))[:30], "desde": agora()}
             self.clientes[writer] = info
             writer.write(protocolo.codificar({"tipo": "hello_ok", "servidor": "servidor_cbo"}))
             writer.write(protocolo.codificar(self._fila_msg()))

@@ -12,3 +12,11 @@ logs_cliente/
 # credenciais (NUNCA versionar)
 .env
 *.env
+
+# empacotamento e configuracoes locais (token)
+build/
+dist/
+*.spec
+cliente_config.json
+servidor_config.json
+erro_cliente.txt

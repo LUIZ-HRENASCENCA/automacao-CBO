@@ -28,9 +28,8 @@ PORTAL_EXE = r"C:\Salux\Módulos - PRODUÇÃO\Portal\portal.exe"
 PORTAL_MENU_FATURAMENTO = (95, 106)
 PORTAL_TILE_FATURAMENTO = (120, 57)
 
-# Cliente-servidor (simulacao na mesma maquina; em producao: SERVIDOR_BIND="0.0.0.0" e host do servidor)
-SERVIDOR_BIND = "127.0.0.1"
-SERVIDOR_HOST = "127.0.0.1"
+# Cliente-servidor. Valores PADRAO: o servidor guarda bind/porta/token em servidor_config.json
+# (token gerado na primeira execucao) e o cliente em cliente_config.json (tela de configuracao).
+SERVIDOR_BIND = "0.0.0.0"          # escuta na rede interna (use 127.0.0.1 para so a propria maquina)
+SERVIDOR_HOST = "10.10.10.249"     # endereco padrao que o cliente tenta (IP da maquina do servidor)
 SERVIDOR_PORTA = 8765
-# Token compartilhado entre servidor e paineis. TROQUE em producao (rede interna apenas).
-TOKEN = "dev-local-trocar-em-producao"

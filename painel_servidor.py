@@ -9,7 +9,7 @@ import queue
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
-import config
+import servidor_config
 from protocolo import legivel
 from banco import Banco
 from servidor_cbo import Servidor
@@ -31,6 +31,12 @@ class PainelServidor:
 
         self.faixa = tk.Label(raiz, text="", font=("Segoe UI", 11, "bold"), pady=6)
         self.faixa.pack(fill="x")
+        self.info = tk.Frame(raiz, bg="#e3f2fd")
+        self.info.pack(fill="x", padx=12, pady=(6, 0))
+        self.l_info = tk.Label(self.info, text="", bg="#e3f2fd", fg="#0d47a1", font=("Segoe UI", 10, "bold"),
+                               anchor="w", justify="left")
+        self.l_info.pack(side="left", padx=8, pady=6)
+        tk.Button(self.info, text="Copiar token", command=self.copiar_token).pack(side="right", padx=8)
         topo = tk.Frame(raiz, bg="#f4f4f4")
         topo.pack(fill="x", padx=12, pady=6)
         tk.Label(topo, text="Modo do worker:", bg="#f4f4f4").pack(side="left")
@@ -68,7 +74,11 @@ class PainelServidor:
             messagebox.showerror("Servidor", self.srv.erro)
             raiz.destroy()
             return
-        self.escrever("info", f"Servidor escutando em {config.SERVIDOR_BIND}:{config.SERVIDOR_PORTA}.")
+        ips = servidor_config.ips_locais() if self.srv.bind in ("0.0.0.0", "") else [self.srv.bind]
+        ender = " ou ".join(f"{ip}:{self.srv.porta}" for ip in ips) or f"<IP desta máquina>:{self.srv.porta}"
+        self.l_info.config(text=f"Informe aos clientes →  Servidor: {ender}     Token: {self.srv.token}")
+        self.escrever("info", f"Servidor escutando em {self.srv.bind}:{self.srv.porta}. "
+                              f"Clientes devem usar: {ender} (token no topo da janela).")
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)
         self.raiz.after(200, self.ciclo)
 
@@ -77,6 +87,11 @@ class PainelServidor:
             lim = self.v_limite.get().strip()
             return WorkerSalux(limite=int(lim) if lim.isdigit() else None)
         return WorkerSimulado()
+
+    def copiar_token(self):
+        self.raiz.clipboard_clear()
+        self.raiz.clipboard_append(self.srv.token)
+        self.escrever("info", "Token copiado para a área de transferência.")
 
     def alternar_pausa(self):
         self.srv.pausar(not self.srv.pausada)
@@ -135,8 +150,10 @@ class PainelServidor:
         else:
             self.faixa.config(text="Aguardando contas", bg="#e8f5e9", fg="#1b5e20")
             self.b_pausa.config(text="Pausar fila")
-        self.status.config(text=f"Clientes conectados: {self.srv.n_clientes}   ·   "
-                                f"Escutando em {config.SERVIDOR_BIND}:{config.SERVIDOR_PORTA}")
+        cl = self.srv.lista_clientes()
+        nomes = ", ".join(f"{c['usuario']} ({c['papel']}, v{c['versao']})" for c in cl) or "nenhum"
+        self.status.config(text=f"Clientes conectados: {len(cl)} — {nomes}   ·   "
+                                f"Escutando em {self.srv.bind}:{self.srv.porta}")
         self.raiz.after(500, self.ciclo)
 
     def fechar(self):

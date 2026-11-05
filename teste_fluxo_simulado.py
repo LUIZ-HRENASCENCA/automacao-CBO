@@ -12,11 +12,14 @@ from pathlib import Path
 import porta
 from banco import Banco
 from cliente_rede import Conexao
-import config
+import cliente_config
+import servidor_config
+from cliente_rede import testar_conexao
 from servidor_cbo import Servidor
 from workers import WorkerSimulado
 
 falhas = []
+TOKEN = "tk-teste-123"
 
 
 def conferir(cond, msg):
@@ -43,15 +46,71 @@ def teste_porta():
     conferir(not porta.avaliar(10, 7, [])[0], "porta: processamento incompleto nao salva")
 
 
+def teste_configs(tmp):
+    arq = tmp / "cliente_config.json"
+    conferir(not cliente_config.existe(arq), "cliente_config: sem arquivo = primeira execucao")
+    cfg = cliente_config.carregar(arq)
+    conferir(cfg["servidor"] == "10.10.10.249" and cfg["porta"] == 8765 and cfg["token"] == "",
+             "cliente_config: padrao 10.10.10.249:8765 e token vazio")
+    conferir(cliente_config.validar(cfg) != "", "cliente_config: sem token nao valida")
+    cfg.update(token="abc", servidor="10.1.1.5", porta="9000", usuario="maria", papel="operador")
+    conferir(cliente_config.validar(cfg) == "", "cliente_config: configuracao completa valida")
+    cliente_config.salvar(cfg, arq)
+    c2 = cliente_config.carregar(arq)
+    conferir(c2["servidor"] == "10.1.1.5" and c2["porta"] == 9000 and c2["papel"] == "operador",
+             "cliente_config: salvar e carregar")
+    conferir(cliente_config.validar({**c2, "porta": "99999"}) != "", "cliente_config: porta invalida recusada")
+    conferir(cliente_config.validar({**c2, "servidor": "a b"}) != "", "cliente_config: endereco com espaco recusado")
+    sarq = tmp / "servidor_config.json"
+    s1 = servidor_config.carregar(sarq)
+    s2 = servidor_config.carregar(sarq)
+    conferir(len(s1["token"]) == 10 and s1["token"] == s2["token"], "servidor_config: token gerado e persistido")
+    conferir(s1["bind"] == "0.0.0.0" and s1["porta"] == 8765, "servidor_config: bind 0.0.0.0 e porta 8765")
+
+
+def teste_conexao_e_reconfigurar(srv_a, banco_b, tmp):
+    ok, msg = testar_conexao("127.0.0.1", 8799, TOKEN)
+    conferir(ok, f"testar_conexao: OK ({msg})")
+    ok, msg = testar_conexao("127.0.0.1", 8799, "errado")
+    conferir(not ok and "token" in msg.lower(), f"testar_conexao: token errado ({msg})")
+    ok, msg = testar_conexao("127.0.0.1", 8797, TOKEN, timeout=2)
+    conferir(not ok and ("recusada" in msg.lower() or "sem resposta" in msg.lower()),
+             f"testar_conexao: porta fechada ({msg})")
+    ok, msg = testar_conexao("host-que-nao-existe.invalid", 8799, TOKEN, timeout=2)
+    conferir(not ok, f"testar_conexao: endereco inexistente ({msg})")
+    conferir(srv_a.n_clientes >= 0 and all(c["papel"] != "teste" for c in srv_a.lista_clientes()),
+             "servidor nao lista conexoes de teste como clientes")
+    # reconfigurar: o mesmo painel passa de um servidor para outro sem reiniciar
+    srv_b = Servidor(banco_b, lambda: WorkerSimulado(velocidade=0.01), bind="127.0.0.1", porta_tcp=8798,
+                     pasta_logs=tmp / "logs_b", token="outro-token")
+    conferir(srv_b.iniciar(), "servidor B iniciou")
+    q = queue.Queue()
+    cli = Conexao("127.0.0.1", 8799, TOKEN, "viajante", "ambos", q)
+    cli.iniciar()
+    conferir(esperar(lambda: any(c["usuario"] == "viajante" for c in srv_a.lista_clientes()), 10),
+             "cliente conectou no servidor A (lista mostra usuario e versao)")
+    info = next(c for c in srv_a.lista_clientes() if c["usuario"] == "viajante")
+    conferir(info["versao"] != "?", f"versao do cliente informada ({info['versao']})")
+    cli.reconfigurar("127.0.0.1", 8798, "outro-token", "viajante", "ambos")
+    conferir(esperar(lambda: any(c["usuario"] == "viajante" for c in srv_b.lista_clientes()), 10),
+             "reconfigurar: cliente passou para o servidor B")
+    conferir(esperar(lambda: not any(c["usuario"] == "viajante" for c in srv_a.lista_clientes()), 10),
+             "reconfigurar: saiu do servidor A")
+    cli.fechar()
+    srv_b.parar()
+
+
 def main():
     teste_porta()
     tmp = Path(tempfile.mkdtemp(prefix="cbo_teste_"))
     banco = Banco(tmp / "fila.db")
     srv = Servidor(banco, lambda: WorkerSimulado(velocidade=0.01), bind="127.0.0.1", porta_tcp=8799,
-                   pasta_logs=tmp / "logs")
+                   pasta_logs=tmp / "logs", token=TOKEN)
     conferir(srv.iniciar(), f"servidor iniciou ({srv.erro or 'ok'})")
+    teste_configs(tmp)
+    teste_conexao_e_reconfigurar(srv, Banco(tmp / "fila_b.db"), tmp)
     q = queue.Queue()
-    cli = Conexao("127.0.0.1", 8799, config.TOKEN, "tester", "ambos", q)
+    cli = Conexao("127.0.0.1", 8799, TOKEN, "tester", "ambos", q)
     cli.iniciar()
     msgs = []
 

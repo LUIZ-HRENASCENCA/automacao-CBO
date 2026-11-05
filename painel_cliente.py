@@ -1,43 +1,53 @@
 """Painel do CLIENTE (operador e/ou secretarias).
 
 Uso: python painel_cliente.py [--papel operador|secretaria|ambos] [--usuario NOME] [--servidor HOST]
+                              [--porta N] [--token TOKEN]
+O servidor, a porta, o token, o usuario e o papel ficam em cliente_config.json (ao lado do
+executavel) e sao editados em "Configurar servidor"; os argumentos acima sobrepoem o arquivo.
   operador   : digita o numero da conta e envia para a fila do servidor.
   secretaria : recebe o aviso quando cada conta termina, confere e marca como REVISADA.
-  ambos      : os dois (padrao, para simulacao na mesma maquina).
+  ambos      : os dois.
 O log mostrado e o MESMO do servidor (linha a linha, em tempo real); ao concluir, o texto completo
 e gravado em logs_cliente/ para quem solicitou a conta. Duplo clique em uma conta abre o log completo.
 """
 import argparse
-import getpass
 import queue
+import sys
+import threading
 import tkinter as tk
+import traceback
 from datetime import datetime
-from pathlib import Path
 from tkinter import messagebox, scrolledtext, ttk
 
-import config
-from cliente_rede import Conexao
+import cliente_config
+from cliente_rede import Conexao, testar_conexao
 from protocolo import legivel
+from versao import VERSAO
 
 CORES = {"info": "#555555", "ok": "#1b7f2a", "aviso": "#b36b00", "erro": "#c62828", "critico": "#c62828"}
 COR_ESTADO = {"SALVA": "#1b7f2a", "NAO_SALVA": "#b36b00", "CONTA_INVALIDA": "#b36b00",
               "FALHA_CRITICA": "#c62828", "PROCESSANDO": "#1565c0"}
-PASTA_CLIENTE = Path(__file__).resolve().parent / "logs_cliente"
+PASTA_CLIENTE = cliente_config.pasta_app() / "logs_cliente"
 
 
 class PainelCliente:
-    def __init__(self, raiz, papel, usuario, host):
-        self.raiz, self.papel, self.usuario = raiz, papel, usuario
+    def __init__(self, raiz, cfg, primeira_execucao=False):
+        self.raiz, self.cfg = raiz, cfg
+        self.papel, self.usuario = cfg["papel"], cfg["usuario"]
+        papel = self.papel
         self.entrada = queue.Queue()
         self.contas = {}
         self.conectado = False
-        raiz.title(f"Cliente CBO - {usuario} ({papel})")
         raiz.geometry("900x700+960+30")
         raiz.configure(bg="#f4f4f4")
+        self.titulo()
 
-        self.faixa = tk.Label(raiz, text="Conectando ao servidor...", font=("Segoe UI", 11, "bold"), pady=6,
+        topo = tk.Frame(raiz, bg="#f4f4f4")
+        topo.pack(fill="x")
+        tk.Button(topo, text="⚙ Configurar servidor", command=self.abrir_config).pack(side="right", padx=8, pady=6)
+        self.faixa = tk.Label(topo, text="Conectando ao servidor...", font=("Segoe UI", 11, "bold"), pady=6,
                               bg="#fff3e0", fg="#e65100")
-        self.faixa.pack(fill="x")
+        self.faixa.pack(side="left", fill="x", expand=True)
 
         if papel in ("operador", "ambos"):
             env = tk.Frame(raiz, bg="#f4f4f4")
@@ -78,10 +88,124 @@ class PainelCliente:
         self.status = tk.Label(raiz, text="", anchor="w", bg="#e8e8e8", padx=8)
         self.status.pack(fill="x", side="bottom")
 
-        self.net = Conexao(host, config.SERVIDOR_PORTA, config.TOKEN, usuario, papel, self.entrada)
+        self.net = Conexao(cfg["servidor"], cfg["porta"], cfg["token"], cfg["usuario"], cfg["papel"], self.entrada)
         self.net.iniciar()
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)
         raiz.after(200, self.ciclo)
+        if primeira_execucao or not cfg["token"]:
+            raiz.after(400, lambda: self.abrir_config(primeira=True))
+
+    def titulo(self):
+        c = self.cfg
+        self.raiz.title(f"Cliente CBO {VERSAO} - {c['usuario']} ({c['papel']}) → {c['servidor']}:{c['porta']}")
+
+    # ------------------------------------------------------------ configuracao do servidor
+    def abrir_config(self, primeira=False):
+        if getattr(self, "dlg_config", None) is not None:
+            try:
+                self.dlg_config.lift()
+                return
+            except tk.TclError:
+                self.dlg_config = None
+        d = self.dlg_config = tk.Toplevel(self.raiz)
+        d.title("Configurar servidor")
+        d.transient(self.raiz)
+        d.resizable(False, False)
+        d.configure(bg="white", padx=18, pady=14)
+        tk.Label(d, text="Servidor da automação de CBO", font=("Segoe UI", 12, "bold"), bg="white").grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        tk.Label(d, text=("Primeira configuração: informe o IP e o token exibidos no painel do servidor."
+                          if primeira else "Altere os dados e use 'Testar conexão' antes de salvar."),
+                 font=("Segoe UI", 9), bg="white", fg="#666").grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        v = {k: tk.StringVar(value=str(self.cfg[k])) for k in ("servidor", "porta", "token", "usuario", "papel")}
+        linhas = (("Endereço/IP do servidor:", "servidor"), ("Porta:", "porta"), ("Token:", "token"),
+                  ("Seu nome de usuário:", "usuario"), ("Papel:", "papel"))
+        for i, (rot, k) in enumerate(linhas, start=2):
+            tk.Label(d, text=rot, bg="white", font=("Segoe UI", 10)).grid(row=i, column=0, sticky="w", pady=3)
+            if k == "papel":
+                w = ttk.Combobox(d, textvariable=v[k], values=cliente_config.PAPEIS, state="readonly", width=24)
+            else:
+                w = tk.Entry(d, textvariable=v[k], width=27, font=("Segoe UI", 10), show="•" if k == "token" else "")
+            w.grid(row=i, column=1, sticky="w", padx=(10, 0), pady=3)
+        ver = tk.IntVar(value=0)
+        tk.Checkbutton(d, text="Mostrar o token", variable=ver, bg="white", font=("Segoe UI", 9),
+                       command=lambda: [w.config(show="" if ver.get() else "•")
+                                        for w in d.grid_slaves(row=4, column=1)]).grid(
+            row=7, column=1, sticky="w", padx=(10, 0))
+        res = tk.Label(d, text="", bg="white", font=("Segoe UI", 9), wraplength=360, justify="left")
+        res.grid(row=8, column=0, columnspan=2, sticky="w", pady=8)
+        rq = queue.Queue()
+
+        def coletar():
+            c = {k: v[k].get().strip() for k in v}
+            c["porta"] = c["porta"]
+            return c
+
+        def checar():
+            c = coletar()
+            erro = cliente_config.validar(c)
+            if erro:
+                res.config(text=erro, fg="#c62828")
+                return None
+            c["porta"] = int(c["porta"])
+            return c
+
+        def testar():
+            c = checar()
+            if not c:
+                return
+            res.config(text="Testando a conexão...", fg="#555")
+            b_testar.config(state="disabled")
+            threading.Thread(target=lambda: rq.put(testar_conexao(c["servidor"], c["porta"], c["token"],
+                                                                  c["usuario"])), daemon=True).start()
+            sondar()
+
+        def sondar():
+            try:
+                ok, msg = rq.get_nowait()
+            except queue.Empty:
+                if d.winfo_exists():
+                    d.after(150, sondar)
+                return
+            if d.winfo_exists():
+                b_testar.config(state="normal")
+                res.config(text=("✔ " if ok else "✖ ") + msg, fg="#1b7f2a" if ok else "#c62828")
+
+        def salvar():
+            c = checar()
+            if not c:
+                return
+            papel_mudou = c["papel"] != self.cfg["papel"]
+            try:
+                cliente_config.salvar(c)
+            except OSError as e:
+                res.config(text=f"Não foi possível salvar o arquivo de configuração: {e}", fg="#c62828")
+                return
+            self.cfg = c
+            self.usuario = c["usuario"]
+            self.net.reconfigurar(c["servidor"], c["porta"], c["token"], c["usuario"], c["papel"])
+            self.titulo()
+            self.faixa.config(text="Conectando ao servidor...", bg="#fff3e0", fg="#e65100")
+            fechar_dlg()
+            if papel_mudou:
+                messagebox.showinfo("Papel alterado", "Feche e abra o painel para aplicar o novo papel.",
+                                    parent=self.raiz)
+
+        def fechar_dlg():
+            self.dlg_config = None
+            d.destroy()
+
+        rod = tk.Frame(d, bg="white")
+        rod.grid(row=9, column=0, columnspan=2, sticky="e", pady=(4, 0))
+        b_testar = tk.Button(rod, text="Testar conexão", command=testar, padx=8)
+        b_testar.pack(side="left", padx=4)
+        tk.Button(rod, text="Salvar e conectar", bg="#1565c0", fg="white", font=("Segoe UI", 9, "bold"),
+                  command=salvar, padx=8).pack(side="left", padx=4)
+        tk.Button(rod, text="Cancelar", command=fechar_dlg, padx=8).pack(side="left", padx=4)
+        d.protocol("WM_DELETE_WINDOW", fechar_dlg)
+        d.update_idletasks()
+        x = self.raiz.winfo_x() + max(0, (self.raiz.winfo_width() - d.winfo_width()) // 2)
+        d.geometry(f"+{x}+{self.raiz.winfo_y() + 80}")
 
     # ------------------------------------------------------------ acoes
     def enviar(self):
@@ -135,14 +259,22 @@ class PainelCliente:
 
     def tratar(self, m):
         t = m.get("tipo")
-        if t == "_conectado":
+        if t == "hello_ok":  # o servidor aceitou o token
             self.conectado = True
+            self.recusado = False
             self.faixa.config(text="Conectado ao servidor", bg="#e8f5e9", fg="#1b5e20")
+        elif t == "_conectado":
+            pass  # socket aberto; a faixa so muda quando o servidor aceita (hello_ok) ou recusa (erro)
         elif t == "_desconectado":
             self.conectado = False
-            self.faixa.config(text="SEM CONEXÃO com o servidor — tentando reconectar...", bg="#ffebee", fg="#b71c1c")
+            if getattr(self, "recusado", False):
+                return  # mantem o aviso de recusa em vez de piscar "sem conexao"
+            self.faixa.config(text="SEM CONEXÃO com o servidor — tentando reconectar (veja ⚙ Configurar servidor)",
+                              bg="#ffebee", fg="#b71c1c")
         elif t == "erro":
-            self.faixa.config(text=f"Servidor recusou: {m.get('msg')}", bg="#ffebee", fg="#b71c1c")
+            self.recusado = True
+            self.faixa.config(text="O servidor RECUSOU a conexão (token incorreto?) — corrija em ⚙ Configurar servidor",
+                              bg="#ffebee", fg="#b71c1c")
         elif t == "fila":
             self.atualizar_fila(m["contas"], m.get("pausada"))
         elif t == "resposta_envio":
@@ -213,14 +345,33 @@ class PainelCliente:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--papel", default="ambos", choices=["operador", "secretaria", "ambos"])
-    ap.add_argument("--usuario", default=getpass.getuser())
-    ap.add_argument("--servidor", default=config.SERVIDOR_HOST)
+    ap.add_argument("--papel", choices=cliente_config.PAPEIS)
+    ap.add_argument("--usuario")
+    ap.add_argument("--servidor")
+    ap.add_argument("--porta", type=int)
+    ap.add_argument("--token")
     a = ap.parse_args()
+    cfg = cliente_config.carregar()
+    primeira = not cliente_config.existe()
+    for k in ("papel", "usuario", "servidor", "porta", "token"):
+        if getattr(a, k):
+            cfg[k] = getattr(a, k)
+            primeira = False
     raiz = tk.Tk()
-    PainelCliente(raiz, a.papel, a.usuario, a.servidor)
+    PainelCliente(raiz, cfg, primeira)
     raiz.mainloop()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:  # no .exe (sem console) o erro precisa ficar visivel
+        txt = traceback.format_exc()
+        try:
+            (cliente_config.pasta_app() / "erro_cliente.txt").write_text(txt, encoding="utf-8")
+            messagebox.showerror("Erro no painel cliente",
+                                 "O painel encontrou um erro e precisa fechar.\nDetalhes em erro_cliente.txt.\n\n"
+                                 + txt.splitlines()[-1])
+        except Exception:
+            pass
+        sys.exit(1)

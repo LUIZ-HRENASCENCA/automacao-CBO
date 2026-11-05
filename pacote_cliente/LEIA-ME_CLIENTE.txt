@@ -1,0 +1,39 @@
+PAINEL CLIENTE - AUTOMACAO DE CBO (SALUX)
+=========================================
+
+INSTALACAO (5 passos)
+1. Extraia esta pasta INTEIRA em um local onde voce possa gravar arquivos,
+   por exemplo:  C:\CBO\PainelCliente     (nao rode de dentro do .zip).
+2. De duplo clique em  PainelCliente.exe
+3. Na primeira vez abre a tela "Configurar servidor". Preencha:
+     - Endereco/IP do servidor  (padrao: 10.10.10.249)
+     - Porta                    (padrao: 8765)
+     - Token                    (peca a quem administra o servidor; aparece no
+                                 painel do servidor)
+     - Seu nome de usuario      (aparece na fila como solicitante)
+     - Papel                    (operador, secretaria ou ambos)
+4. Clique em "Testar conexao". Deve aparecer "Conexao OK".
+5. Clique em "Salvar e conectar". Pronto: a faixa do topo fica verde
+   ("Conectado ao servidor").
+
+USO
+- Operador: digite o numero da conta e clique em "Enviar para a fila".
+- Secretaria: ao terminar cada conta aparece um aviso; confira a conta no Salux
+  e clique em "Marcar como REVISADA". TODA conta precisa de revisao manual.
+- Duplo clique em uma conta abre o log completo.
+- Os logs ficam na pasta "logs_cliente" (ao lado do PainelCliente.exe).
+
+TROCAR DE SERVIDOR / TOKEN
+- Botao "Configurar servidor" (canto superior direito). Os dados ficam no
+  arquivo cliente_config.json, ao lado do .exe. Para reinstalar do zero,
+  apague esse arquivo.
+
+PROBLEMAS COMUNS
+- "O servidor RECUSOU a conexao": token incorreto. Confira o token no painel
+  do servidor.
+- "SEM CONEXAO": o painel do servidor esta fechado, o IP mudou ou ha bloqueio
+  de rede. Use "Testar conexao" para ver a causa.
+- O antivirus/SmartScreen bloqueou o programa: o executavel nao tem assinatura
+  digital. Peca a TI para liberar a pasta C:\CBO\PainelCliente.
+- Se o programa fechar sozinho, envie o arquivo erro_cliente.txt (na mesma
+  pasta do .exe) para quem administra o sistema.

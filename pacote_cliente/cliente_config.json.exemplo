@@ -1,0 +1,7 @@
+{
+  "servidor": "10.10.10.249",
+  "porta": 8765,
+  "token": "",
+  "usuario": "seu.nome",
+  "papel": "ambos"
+}
