@@ -4,7 +4,7 @@ Preenche o campo **CBOS** da aba **Origem** da tela *Manutenção da Conta Pacie
 
 Existem dois modos de uso:
 
-1. **Modo local (v1.0)** — um painel único que preenche a conta aberta na máquina (`painel_cbo.py`).
+1. **Modo local** — um painel único que abre a conta, preenche o CBO, **salva e fecha** (`painel_cbo.py`).
 2. **Modo cliente/servidor (branch `dev`)** — um **servidor** com o Salux logado processa uma **fila de contas**; **painéis cliente** (operador e secretárias) enviam contas e recebem o resultado em tempo real. Já funciona completo em **simulação**; com o **Salux real** salva e fecha a conta (implementado, **ainda não validado de ponta a ponta**; ver "Estado atual").
 
 > A automação preenche; **toda conta passa por revisão manual**, mesmo quando salva.
@@ -67,7 +67,7 @@ Campo da conta + **Enviar para a fila**, lista da fila, log em tempo real (o mes
 (Na tela os nomes aparecem sem underline; no banco continuam `NAO_SALVA` etc.)
 
 ### Salvamento e fechamento (`cbo_core.salvar_e_fechar`)
-Botão **Salvar** (ícone de check da barra, clique real em `config.POS_BOTAO_SALVAR`) → se aparecer *"Existem valores zerados…"*, clica **Sim** → espera não haver mais avisos → **fecha a tela de Manutenção da Conta** (se o Salux perguntar algo ao fechar, é erro crítico).
+Botão **Salvar** (ícone de check da barra, clique real em `config.POS_BOTAO_SALVAR`) → se aparecer *"Existem valores zerados…"*, clica **Sim** → espera não haver mais avisos → **fecha a tela de Manutenção da Conta** (se o Salux perguntar algo ao fechar, é erro crítico). Pelo terminal: `python preencher_cbo.py --conta N` (salva por padrão, sem limite de itens; `--sem-salvar` só preenche).
 
 ### Porta de salvamento (`porta.py`)
 - **Não salva** se: 50% ou mais dos itens tiverem problema **não tolerado**; processamento incompleto; erro crítico; erro no Salux ou no servidor.
@@ -99,7 +99,9 @@ Botão **Salvar** (ícone de check da barra, clique real em `config.POS_BOTAO_SA
 ```bash
 python painel_cbo.py
 ```
-O painel agora tem campo **Nº da conta**, **Máx. itens (teste)** e a opção de **entrar no Salux automaticamente** (login do `.env`). Sem número de conta, usa a conta já aberta na aba Itens. Pelo terminal: `python preencher_cbo.py [--login | --espera-login] [--conta N] [max_itens]`. **Não salva nada.**
+O painel agora tem campo **Nº da conta**, **Máx. itens (teste)** e a opção de **entrar no Salux automaticamente** (login do `.env`). Sem número de conta, usa a conta já aberta na aba Itens. Pelo terminal: `python preencher_cbo.py [--login | --espera-login] [--conta N] [--sem-salvar] [max_itens]`.
+
+**O painel e o terminal agora SALVAM e FECHAM a conta ao final** (salvamento não é opcional): porta de segurança (menos de 50% dos itens com problema) → botão Salvar → *Sim* ao aviso de valores zerados → fecha a tela da conta. **Não salva** se a execução não concluiu, se houve erro crítico, se a porta barrar ou se **Máx. itens** estiver preenchido (modo de teste, conta parcial); nesses casos a conta continua aberta no Salux. `--sem-salvar` (terminal) só preenche.
 
 ### Regras de preenchimento
 - CBOS **já preenchido** → pula. CBOS vazio → clica na seta e escolhe a **primeira opção**.

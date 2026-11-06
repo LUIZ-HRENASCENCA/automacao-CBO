@@ -47,6 +47,8 @@ class Resultado:
     tempo: str = "00:00:00"
     linhas_log: list = field(default_factory=list)  # formato legado "Item N: STATUS - detalhe"
     arquivos: list = field(default_factory=list)
+    salvou: bool = False        # a conta foi salva e a tela fechada por salvar_se_liberado
+    nota_salvar: str = ""       # por que salvou / nao salvou (para o log e as mensagens)
 
 
 # ---------------------------------------------------------------- classificacao
@@ -515,6 +517,43 @@ def salvar_e_fechar(log):
     time.sleep(2.0)  # deixa o Salux terminar de atualizar a tela antes de fechar
     fechar_conta(app, janela)
     log("ok", "Tela da conta fechada.")
+
+
+def salvar_se_liberado(res, log, limite=None):
+    """Etapa final do fluxo principal: porta de salvamento -> salvar -> fechar a tela da conta.
+
+    Regras: so salva se a execucao concluiu (com ou sem erros por linha), SEM limite de itens
+    (teste) e se a porta liberar (menos de 50% de itens com problema nao tolerado). Se nao
+    salvar, a conta continua aberta no Salux. Erro ao salvar/fechar vira estado CRITICO.
+    Preenche res.salvou e res.nota_salvar.
+    """
+    import porta
+    if res.estado == "CONTA_INVALIDA":
+        res.nota_salvar = "Nao salvou: a conta nao foi aberta (nada foi alterado no Salux)."
+    elif res.estado not in ("CONCLUIDO", "CONCLUIDO_COM_ERROS"):
+        res.nota_salvar = ("Nao salvou: a execucao nao foi concluida; a conta continua aberta no Salux "
+                           "(confira e feche manualmente).")
+    elif limite:
+        res.nota_salvar = (f"Nao salvou: modo de teste (max. itens = {limite}); a conta continua aberta "
+                           "no Salux.")
+    else:
+        ok, motivo, _, _ = porta.avaliar(res.total, res.tratados, res.erros)
+        log("info" if ok else "aviso", f"Porta de salvamento: {'PODE SALVAR' if ok else 'NAO SALVAR'} - {motivo}")
+        if not ok:
+            res.nota_salvar = f"Nao salvou: {motivo} A conta continua aberta no Salux."
+        else:
+            try:
+                salvar_e_fechar(log)
+                res.salvou = True
+                res.nota_salvar = "Conta salva e tela da conta fechada."
+                return
+            except Exception as e:  # ErroCritico ou qualquer falha inesperada
+                res.estado = "CRITICO"
+                res.mensagem = f"Erro ao salvar/fechar a conta: {e}"
+                res.nota_salvar = "Nao foi possivel salvar/fechar; a conta pode continuar aberta no Salux."
+                log("critico", f"ERRO CRITICO - {res.mensagem}")
+                return
+    log("aviso", res.nota_salvar)
 
 
 # ---------------------------------------------------------------- logs em arquivo

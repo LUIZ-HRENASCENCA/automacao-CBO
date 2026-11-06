@@ -101,6 +101,45 @@ def teste_salvamento_servidor(tmp):
     time.sleep(0.3)
 
 
+def teste_fluxo_principal():
+    """salvar_se_liberado (usado pelo painel local e pelo terminal) com salvar_e_fechar simulado."""
+    chamadas, original = [], cbo_core.salvar_e_fechar
+    cbo_core.salvar_e_fechar = lambda log: chamadas.append(1)
+    try:
+        def res(estado="CONCLUIDO", total=10, tratados=10, erros=()):
+            return cbo_core.Resultado(estado=estado, total=total, tratados=tratados, erros=list(erros))
+
+        nulo = lambda n, m: None
+        r = res()
+        cbo_core.salvar_se_liberado(r, nulo)
+        conferir(r.salvou and len(chamadas) == 1, "principal: execucao ok -> salva e fecha")
+        tol = [(i, "Campo CBO sem especialidade para preencher") for i in range(1, 6)]
+        r = res("CONCLUIDO_COM_ERROS", erros=tol)
+        cbo_core.salvar_se_liberado(r, nulo)
+        conferir(r.salvou and len(chamadas) == 2, "principal: so erros tolerados -> salva e fecha")
+        r = res("CONCLUIDO_COM_ERROS", erros=[(i, "CBO invalido") for i in range(1, 7)])
+        cbo_core.salvar_se_liberado(r, nulo)
+        conferir(not r.salvou and len(chamadas) == 2 and "50%" in r.nota_salvar, "principal: >=50% problemas -> nao salva")
+        r = res()
+        cbo_core.salvar_se_liberado(r, nulo, limite=5)
+        conferir(not r.salvou and len(chamadas) == 2, "principal: com limite de itens -> nao salva")
+        for est in ("CRITICO", "INTERROMPIDO", "CONTA_INVALIDA"):
+            r = res(est)
+            cbo_core.salvar_se_liberado(r, nulo)
+            conferir(not r.salvou and len(chamadas) == 2, f"principal: estado {est} -> nao salva")
+
+        def falha(log):
+            raise cbo_core.ErroCritico("o Salux perguntou algo inesperado")
+
+        cbo_core.salvar_e_fechar = falha
+        r = res()
+        cbo_core.salvar_se_liberado(r, nulo)
+        conferir(r.estado == "CRITICO" and not r.salvou and "inesperado" in r.mensagem,
+                 "principal: erro ao salvar -> estado CRITICO")
+    finally:
+        cbo_core.salvar_e_fechar = original
+
+
 def teste_configs(tmp):
     arq = tmp / "cliente_config.json"
     conferir(not cliente_config.existe(arq), "cliente_config: sem arquivo = primeira execucao")
@@ -158,6 +197,7 @@ def teste_conexao_e_reconfigurar(srv_a, banco_b, tmp):
 def main():
     teste_porta()
     teste_dialogos()
+    teste_fluxo_principal()
     tmp = Path(tempfile.mkdtemp(prefix="cbo_teste_"))
     banco = Banco(tmp / "fila.db")
     srv = Servidor(banco, lambda: WorkerSimulado(velocidade=0.01), bind="127.0.0.1", porta_tcp=8799,

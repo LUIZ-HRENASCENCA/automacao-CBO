@@ -15,7 +15,7 @@ import cbo_core
 from caminhos import pasta_app
 import config
 
-ORIENTACAO = (
+ORIENTACAO_BASE = (
     "ANTES DE INICIAR\n\n"
     "  •  Com o login automático, o painel abre o Salux, entra e abre a conta.\n"
     "  •  Sem o número da conta, usa a conta já aberta no Salux (aba ITENS).\n\n"
@@ -24,8 +24,9 @@ ORIENTACAO = (
     "  •  Não clique no Salux nem em outras janelas.\n"
     "  •  Não minimize nem feche o Salux.\n\n"
     "O painel avisará quando terminar e a tela estiver liberada.\n"
-    "A automação NÃO salva nada: confira e salve manualmente."
 )
+ORIENT_SALVA = ("Ao final a automação SALVA a conta (se a regra de segurança liberar) e FECHA a tela "
+                "da conta.\nMesmo assim, confira a conta depois no Salux.")
 
 CORES = {"info": "#555555", "ok": "#1b7f2a", "aviso": "#b36b00",
          "erro": "#c62828", "critico": "#c62828"}
@@ -51,7 +52,7 @@ class Painel:
 
         tk.Label(raiz, text="Preenchimento automático de CBO", font=("Segoe UI", 14, "bold"),
                  bg="#f4f4f4").pack(pady=(12, 2))
-        tk.Label(raiz, text="Aba Origem do Salux · não salva nada", font=("Segoe UI", 9),
+        tk.Label(raiz, text="Preenche o CBO, salva e fecha a conta", font=("Segoe UI", 9),
                  bg="#f4f4f4", fg="#666").pack()
 
         self.faixa = tk.Label(raiz, text="", font=("Segoe UI", 11, "bold"), pady=6)
@@ -175,7 +176,8 @@ class Painel:
         dlg.resizable(False, False)
         tk.Label(dlg, text="⚠  Leia antes de iniciar", font=("Segoe UI", 13, "bold"),
                  bg="white", fg="#b71c1c").pack(padx=20, pady=(16, 6), anchor="w")
-        tk.Label(dlg, text=ORIENTACAO, font=("Segoe UI", 10), bg="white", justify="left"
+        tk.Label(dlg, text=ORIENTACAO_BASE + "\n" + ORIENT_SALVA,
+                 font=("Segoe UI", 10), bg="white", justify="left"
                  ).pack(padx=20, pady=6, anchor="w")
         resp = {"ok": False}
         rod = tk.Frame(dlg, bg="white")
@@ -213,7 +215,9 @@ class Painel:
                     log("critico", f"ERRO CRITICO ao entrar no Salux: {e}")
                     self.fila.put(("fim", cbo_core.Resultado(estado="CRITICO", mensagem=str(e))))
                     return
-            res = cbo_core.executar(log, self.parar, limite=self.limite, conta=self.conta)
+            res = cbo_core.executar(log, self.parar, limite=self.limite, conta=self.conta,
+                                    msg_final="vai salvar e fechar a conta.")
+            cbo_core.salvar_se_liberado(res, log, self.limite)
         except Exception as e:  # nao deveria ocorrer: executar trata tudo
             log("critico", f"ERRO CRITICO inesperado: {type(e).__name__}: {e}")
             res = cbo_core.Resultado(estado="CRITICO", mensagem=str(e))
@@ -240,7 +244,7 @@ class Painel:
                   f"Já tinham CBO: {res.ja_preenchidos}\n"
                   f"Tempo: {res.tempo}")
         liberacao = "\n\nTELA LIBERADA: você já pode usar o mouse, o teclado e o Salux."
-        nao_salvou = "\nNada foi salvo: confira a aba Origem e salve manualmente."
+        nao_salvou = "\n" + (res.nota_salvar or "Nao salvou.") + "\nConfira a conta no Salux."
         if res.estado == "CONCLUIDO":
             messagebox.showinfo("Concluído", "Automação concluída com sucesso.\n\n" + resumo
                                 + nao_salvou + liberacao, parent=self.raiz)
