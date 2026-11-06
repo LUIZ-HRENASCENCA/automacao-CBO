@@ -158,6 +158,53 @@ def _pbdw_visiveis(w):
     return [c for c in w.descendants(class_name="pbdw") if c.is_visible() and c.rectangle().width() > 100]
 
 
+def escolher_regioes(rect_janela, regioes):
+    """Acha o menu (esquerda) e a area dos modulos do portal SEM tamanhos fixos em pixels.
+
+    rect_janela e regioes: tuplas (left, top, right, bottom) em coordenadas de tela.
+    Usa proporcoes da janela do portal, entao funciona em qualquer resolucao (1920x1080,
+    1600x900...). Menu: DataWindow alto encostado na borda esquerda. Modulos: o maior
+    DataWindow alto e largo, bem depois do menu. Devolve (menu, modulos), cada um tupla ou None.
+    """
+    L, T, R, B = rect_janela
+    W, H = max(R - L, 1), max(B - T, 1)
+    altos = [r for r in regioes if (r[3] - r[1]) > 0.45 * H]
+    menu = [r for r in altos if (r[0] - L) < 0.06 * W]
+    tiles = [r for r in altos if (r[0] - L) > 0.07 * W and (r[2] - r[0]) > 0.35 * W]
+    menu = min(menu, key=lambda r: (r[0], -(r[3] - r[1]))) if menu else None
+    tiles = max(tiles, key=lambda r: (r[2] - r[0]) * (r[3] - r[1])) if tiles else None
+    return menu, tiles
+
+
+def _diagnostico(portal, motivo):
+    """Grava logs/diagnostico_portal_<hora>.txt (+ .png) para ajustar a abertura do Faturamento."""
+    from datetime import datetime
+    pasta = pasta_app() / config.PASTA_LOGS
+    pasta.mkdir(exist_ok=True)
+    base = pasta / f"diagnostico_portal_{datetime.now():%Y%m%d_%H%M%S}"
+    linhas = [motivo]
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        linhas.append(f"tela (espaco do processo): {u.GetSystemMetrics(0)}x{u.GetSystemMetrics(1)}")
+        r = portal.rectangle()
+        linhas.append(f"portal: left={r.left} top={r.top} W={r.width()} H={r.height()} "
+                      f"minimizada={portal.is_minimized()}")
+        for c in portal.descendants(class_name="pbdw"):
+            q = c.rectangle()
+            linhas.append(f"  pbdw visivel={c.is_visible()} left={q.left - r.left} top={q.top - r.top} "
+                          f"W={q.width()} H={q.height()}")
+    except Exception as e:
+        linhas.append(f"(falha ao ler o portal: {e})")
+    base.with_suffix(".txt").write_text("\n".join(linhas), encoding="utf-8")
+    try:
+        from PIL import ImageGrab
+        ImageGrab.grab().save(base.with_suffix(".png"))
+    except Exception:
+        pass
+    return base.with_suffix(".txt")
+
+
 def abrir_faturamento(portal, espera=60, log=print):
     """No portal logado: grupo 'Faturamento' (menu esquerdo) > azulejo 'Faturamento'."""
     if faturamento_aberto():
@@ -169,18 +216,17 @@ def abrir_faturamento(portal, espera=60, log=print):
     time.sleep(1.2)
     portal.set_focus()
     time.sleep(0.8)
-    grades = sorted(_pbdw_visiveis(portal), key=lambda c: c.rectangle().left)
-    # menu a esquerda: DataWindow que comeca na borda esquerda (left < 100) e e alto;
-    # azulejos: DataWindow mais a direita (left > 150) e largo
-    menu = [c for c in grades if c.rectangle().left < 100 and c.rectangle().height() > 600]
-    tiles = [c for c in grades if c.rectangle().left > 150 and c.rectangle().width() > 1000
-             and c.rectangle().height() > 600]
-    if not menu or not tiles:
-        raise RuntimeError("Menu ou area de modulos do portal nao encontrados.")
-    m, t = menu[0].rectangle(), tiles[0].rectangle()
-    mouse.click(coords=(m.left + config.PORTAL_MENU_FATURAMENTO[0], m.top + config.PORTAL_MENU_FATURAMENTO[1]))
+    r = portal.rectangle()
+    regioes = [(c.rectangle().left, c.rectangle().top, c.rectangle().right, c.rectangle().bottom)
+               for c in _pbdw_visiveis(portal)]
+    m, t = escolher_regioes((r.left, r.top, r.right, r.bottom), regioes)
+    if m is None or t is None:
+        arq = _diagnostico(portal, "Menu ou area de modulos do portal nao encontrados.")
+        raise RuntimeError("Menu ou area de modulos do portal nao encontrados "
+                           f"(diagnostico gravado em {arq}).")
+    mouse.click(coords=(m[0] + config.PORTAL_MENU_FATURAMENTO[0], m[1] + config.PORTAL_MENU_FATURAMENTO[1]))
     time.sleep(1.2)
-    mouse.click(coords=(t.left + config.PORTAL_TILE_FATURAMENTO[0], t.top + config.PORTAL_TILE_FATURAMENTO[1]))
+    mouse.click(coords=(t[0] + config.PORTAL_TILE_FATURAMENTO[0], t[1] + config.PORTAL_TILE_FATURAMENTO[1]))
     log("Abrindo o modulo Faturamento...")
     fim = time.time() + espera
     while time.time() < fim:
@@ -188,7 +234,8 @@ def abrir_faturamento(portal, espera=60, log=print):
         if faturamento_aberto():
             time.sleep(3.0)  # deixa a tela principal terminar de carregar
             return
-    raise RuntimeError("O modulo Faturamento nao abriu em %d s." % espera)
+    arq = _diagnostico(portal, f"O modulo Faturamento nao abriu em {espera} s depois dos cliques.")
+    raise RuntimeError(f"O modulo Faturamento nao abriu em {espera} s (diagnostico em {arq}).")
 
 
 def garantir_faturamento(log=print, login_manual=False):

@@ -9,6 +9,7 @@ import queue
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
+import perfil_tela
 import servidor_config
 from protocolo import legivel
 from banco import Banco
@@ -77,6 +78,14 @@ class PainelServidor:
         ips = servidor_config.ips_locais() if self.srv.bind in ("0.0.0.0", "") else [self.srv.bind]
         ender = " ou ".join(f"{ip}:{self.srv.porta}" for ip in ips) or f"<IP desta máquina>:{self.srv.porta}"
         self.l_info.config(text=f"Informe aos clientes →  Servidor: {ender}     Token: {self.srv.token}")
+        aviso_tela = perfil_tela.aviso()
+        esp = perfil_tela.esperado()
+        if aviso_tela:
+            tk.Label(raiz, text=aviso_tela, bg="#fff3e0", fg="#e65100", font=("Segoe UI", 9, "bold"),
+                     wraplength=860, justify="left").pack(fill="x", padx=12, pady=(4, 0), before=self.arvore)
+            self.escrever("aviso", aviso_tela)
+        elif esp:
+            self.escrever("info", f"Perfil de tela do pacote: {esp[0]}x{esp[1]} (confere com esta tela).")
         self.escrever("info", f"Servidor escutando em {self.srv.bind}:{self.srv.porta}. "
                               f"Clientes devem usar: {ender} (token no topo da janela).")
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)

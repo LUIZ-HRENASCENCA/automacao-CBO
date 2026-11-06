@@ -8,7 +8,9 @@ REQUISITOS DA MAQUINA DO SERVIDOR
 - Windows com o Salux instalado (portal.exe em C:\Salux\Modulos - PRODUCAO\Portal\ ).
 - Sessao do Windows ABERTA e DESBLOQUEADA o tempo todo (a automacao controla mouse e teclado
   reais). Nao deixe a tela bloquear; nao use RDP desconectado.
-- Mesma resolucao e escala de tela (100%) usadas nos testes. Salux maximizado.
+- TELA: este pacote traz o arquivo perfil_tela.json (resolucao para a qual foi preparado, ex.:
+  1600x900). A escala do Windows deve ser 100%. Se a tela for diferente, o painel mostra um aviso
+  em laranja e o log registra. O portal do Salux e maximizado automaticamente.
 
 INSTALACAO
 1. Extraia a pasta INTEIRA em um local com permissao de escrita, ex.: C:\CBO\PainelServidor
@@ -35,3 +37,7 @@ PROBLEMAS COMUNS
 - "Salux (faturam.exe) nao encontrado": o Faturamento nao esta aberto/logado (confira o .env).
 - Login falha: confira USERNAME/SENHA no .env e a resolucao/escala da tela.
 - Antivirus bloqueou o .exe: peca a TI para liberar a pasta C:\CBO\PainelServidor.
+
+SE A ABERTURA DO FATURAMENTO FALHAR
+- O programa grava em logs\diagnostico_portal_<data>.txt (e .png) as medidas do portal e uma foto
+  da tela. Envie esses dois arquivos para quem administra o sistema.

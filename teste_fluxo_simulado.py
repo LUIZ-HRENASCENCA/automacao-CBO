@@ -14,6 +14,8 @@ from banco import Banco
 from cliente_rede import Conexao
 import cbo_core
 import cliente_config
+import perfil_tela
+import salux_sessao
 import servidor_config
 from cliente_rede import testar_conexao
 from servidor_cbo import Servidor
@@ -45,6 +47,49 @@ def teste_porta():
     conferir(not porta.avaliar(10, 10, erros_prob)[0], "porta: 5 de 10 com problema nao salva (>=50%)")
     conferir(porta.avaliar(10, 10, erros_prob[:4])[0], "porta: 4 de 10 com problema salva")
     conferir(not porta.avaliar(10, 7, [])[0], "porta: processamento incompleto nao salva")
+
+
+def _portal(larg, alt, desloca_x, desloca_y):
+    """Layout do portal medido em 1920x1080 (janela maximizada 1936x1056), ajustado a outra tela.
+
+    Itens a esquerda/topo ficam fixos; os da direita andam com a largura e os altos com a altura.
+    Devolve (rect_janela, regioes) em coordenadas de tela (janela comeca em -8,-8).
+    """
+    L, T = -8, -8
+    W, H = larg + 16, alt - 40 + 16
+    rel = [(1495 - desloca_x, 68, 413, 259), (1725 - desloca_x, 32, 185, 33),
+           (1498 - desloca_x, 352, 406, 676 - desloca_y), (1495 - desloca_x, 328, 413, 701 - desloca_y),
+           (206, 89, 1277 - desloca_x, 931 - desloca_y), (23, 68, 1475 - desloca_x, 961 - desloca_y)]
+    return (L, T, L + W, T + H), [(L + x, T + y, L + x + w, T + y + h) for x, y, w, h in rel]
+
+
+def teste_portal_resolucoes():
+    for nome, larg, alt in (("1920x1080", 1920, 1080), ("1600x900", 1600, 900), ("1366x768", 1366, 768)):
+        rj, regs = _portal(larg, alt, 1920 - larg, 1080 - alt)
+        menu, tiles = salux_sessao.escolher_regioes(rj, regs)
+        ok = (menu is not None and tiles is not None and menu[0] - rj[0] == 23 and tiles[0] - rj[0] == 206)
+        conferir(ok, f"portal {nome}: menu e area dos modulos encontrados "
+                     f"(modulos {tiles[2] - tiles[0] if tiles else '-'} px de largura)")
+    conferir(salux_sessao.escolher_regioes((-8, -8, 1608, 868), [])[0] is None, "portal: sem DataWindows -> None")
+    # o criterio antigo (largura > 1000 px) falharia em 1600x900:
+    rj, regs = _portal(1600, 900, 320, 180)
+    conferir(max(r[2] - r[0] for r in regs if r[0] - rj[0] == 206) < 1000,
+             "portal 1600x900: area dos modulos tem menos de 1000 px (o filtro antigo nao a achava)")
+
+
+def teste_perfil_tela():
+    orig_e, orig_a = perfil_tela.esperado, perfil_tela.tela_atual
+    try:
+        perfil_tela.esperado = lambda: (1600, 900)
+        perfil_tela.tela_atual = lambda: (1600, 900)
+        conferir(perfil_tela.aviso() == "", "perfil de tela: igual -> sem aviso")
+        perfil_tela.tela_atual = lambda: (1920, 1080)
+        conferir("1600x900" in perfil_tela.aviso() and "1920x1080" in perfil_tela.aviso(),
+                 "perfil de tela: diferente -> aviso com as duas resolucoes")
+        perfil_tela.esperado = lambda: None
+        conferir(perfil_tela.aviso() == "", "perfil de tela: sem perfil -> sem aviso")
+    finally:
+        perfil_tela.esperado, perfil_tela.tela_atual = orig_e, orig_a
 
 
 def teste_dialogos():
@@ -197,6 +242,8 @@ def teste_conexao_e_reconfigurar(srv_a, banco_b, tmp):
 def main():
     teste_porta()
     teste_dialogos()
+    teste_portal_resolucoes()
+    teste_perfil_tela()
     teste_fluxo_principal()
     tmp = Path(tempfile.mkdtemp(prefix="cbo_teste_"))
     banco = Banco(tmp / "fila.db")

@@ -115,7 +115,11 @@ class WorkerSalux:
     def executar(self, conta, log, parar):
         import cbo_core
         import salux_sessao
+        import perfil_tela
         t0 = time.time()
+        aviso_tela = perfil_tela.aviso()
+        if aviso_tela:
+            log("aviso", aviso_tela)
         try:
             log("info", "Preparando o Salux (portal, login e Faturamento)...")
             salux_sessao.garantir_faturamento(lambda m: log("info", m))
