@@ -12,6 +12,7 @@ from pathlib import Path
 from tkinter import messagebox, scrolledtext
 
 import cbo_core
+from caminhos import pasta_app
 import config
 
 ORIENTACAO = (
@@ -142,7 +143,7 @@ class Painel:
         self.fazer_login = self.v_login.get()
         if not self.confirmar():
             return
-        pasta = Path(__file__).resolve().parent / config.PASTA_LOGS
+        pasta = pasta_app() / config.PASTA_LOGS
         pasta.mkdir(exist_ok=True)
         caminho = pasta / f"execucao_{datetime.now():%Y%m%d_%H%M%S}.txt"
         self.arq = open(caminho, "w", encoding="utf-8")

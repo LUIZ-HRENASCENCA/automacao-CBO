@@ -4,7 +4,9 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-ARQ = Path(__file__).resolve().parent / "fila.db"
+from caminhos import pasta_app
+
+ARQ = pasta_app() / "fila.db"
 ATIVAS = ("ENFILEIRADA", "PROCESSANDO")
 
 SQL = """

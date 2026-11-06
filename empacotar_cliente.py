@@ -13,15 +13,17 @@ from versao import VERSAO
 
 RAIZ = Path(__file__).resolve().parent
 DIST, BUILD = RAIZ / "dist", RAIZ / "build"
-PASTA = DIST / "PainelCliente"
+PKG = BUILD / "pkg"   # monta fora de dist: nao conflita com um .exe em uso em dist
+PASTA = PKG / "PainelCliente"
 PROIBIDOS = (".env", "servidor_config", "cliente_config.json", "fila.db", "pywinauto", "salux_sessao",
              "cbo_core", "logs_cliente")
 
 
 def main():
+    DIST.mkdir(exist_ok=True)
     shutil.rmtree(PASTA, ignore_errors=True)
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
-                    "--name", "PainelCliente", "--distpath", str(DIST), "--workpath", str(BUILD),
+                    "--name", "PainelCliente", "--distpath", str(PKG), "--workpath", str(BUILD),
                     "--specpath", str(BUILD), "--exclude-module", "pywinauto", "painel_cliente.py"],
                    check=True, cwd=RAIZ)
     for arq in (RAIZ / "pacote_cliente").iterdir():

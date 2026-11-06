@@ -13,11 +13,7 @@ import config
 PAPEIS = ("operador", "secretaria", "ambos")
 
 
-def pasta_app():
-    """Pasta do executavel (PyInstaller) ou do projeto."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+from caminhos import pasta_app  # noqa: E402  (pasta do executavel ou do projeto)
 
 
 ARQ = pasta_app() / "cliente_config.json"

@@ -22,7 +22,9 @@ from pywinauto import Application, mouse
 
 import config
 
-PASTA = Path(__file__).resolve().parent
+from caminhos import pasta_app
+
+PASTA = pasta_app()
 
 
 class ErroCritico(Exception):

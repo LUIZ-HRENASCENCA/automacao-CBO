@@ -19,6 +19,7 @@ from pathlib import Path
 from pywinauto import Application, mouse
 
 import config
+from caminhos import pasta_app
 
 TITULO_PORTAL = "Portal Salux SX"
 
@@ -84,7 +85,7 @@ def aguardar_login(app, log=print, espera=300):
     raise RuntimeError(f"Login nao concluido em {espera} s.")
 
 
-ARQ_ENV = Path(__file__).resolve().parent / ".env"
+ARQ_ENV = pasta_app() / ".env"
 # posicoes (x, y) relativas a janela de login (FNWNS3): campos Usuario, Senha e botao Entrar
 LOGIN_POS_USUARIO = (687, 208)
 LOGIN_POS_SENHA = (687, 298)

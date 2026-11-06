@@ -14,6 +14,7 @@ import config
 import porta
 import protocolo
 import servidor_config
+from caminhos import pasta_app
 from protocolo import legivel
 from banco import Banco, agora
 
@@ -31,7 +32,7 @@ class Servidor:
         self.bind = bind or cfg.get("bind")
         self.porta = porta_tcp or cfg.get("porta")
         self.token = token or cfg.get("token")
-        self.pasta_logs = Path(pasta_logs or Path(__file__).resolve().parent / config.PASTA_LOGS)
+        self.pasta_logs = Path(pasta_logs or pasta_app() / config.PASTA_LOGS)
         self.clientes = {}
         self.pausada = False
         self.parar_atual = threading.Event()

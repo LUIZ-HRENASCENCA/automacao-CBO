@@ -1,0 +1,37 @@
+PAINEL SERVIDOR - AUTOMACAO DE CBO (SALUX)
+==========================================
+
+ATENCAO: no modo "Salux real" a automacao SALVA contas em PRODUCAO. Comece sempre no modo
+"Simulado" e use apenas contas de teste na primeira vez.
+
+REQUISITOS DA MAQUINA DO SERVIDOR
+- Windows com o Salux instalado (portal.exe em C:\Salux\Modulos - PRODUCAO\Portal\ ).
+- Sessao do Windows ABERTA e DESBLOQUEADA o tempo todo (a automacao controla mouse e teclado
+  reais). Nao deixe a tela bloquear; nao use RDP desconectado.
+- Mesma resolucao e escala de tela (100%) usadas nos testes. Salux maximizado.
+
+INSTALACAO
+1. Extraia a pasta INTEIRA em um local com permissao de escrita, ex.: C:\CBO\PainelServidor
+   (o programa grava aqui: fila.db, servidor_config.json, pasta logs).
+2. Para o login automatico: copie o arquivo ".env.exemplo" para ".env" (mesma pasta) e preencha
+     USERNAME=seu_usuario_salux
+     SENHA=sua_senha_salux
+   Sem a SENHA no .env o programa espera uma pessoa digitar o login no Salux.
+   Proteja o .env: so o usuario do Windows que roda a automacao deve ter acesso.
+3. De duplo clique em PainelServidor.exe.
+4. No topo da janela aparecem o ENDERECO (IP:porta) e o TOKEN. Informe-os aos clientes
+   (tela "Configurar servidor" do PainelCliente). Use "Copiar token".
+5. Deixe o modo em "Simulado" para o primeiro teste. Depois escolha "Salux real".
+
+USO
+- A faixa do topo mostra o estado: Aguardando contas / PROCESSANDO (nao mexa na tela!) / FILA PAUSADA.
+- Botoes: Pausar/Retomar fila, Parar conta atual, Reiniciar fila (reenfileira as falhas criticas).
+- A fila pausa sozinha em falha critica ou quando a conta nao e salva e fica aberta no Salux.
+  Resolva (feche a conta no Salux) e use "Retomar fila" ou "Reiniciar fila".
+- Logs: pasta "logs" (um .txt por conta) e fila.db (banco).
+
+PROBLEMAS COMUNS
+- Cliente nao conecta: confira IP/porta/token; o painel do servidor precisa estar aberto.
+- "Salux (faturam.exe) nao encontrado": o Faturamento nao esta aberto/logado (confira o .env).
+- Login falha: confira USERNAME/SENHA no .env e a resolucao/escala da tela.
+- Antivirus bloqueou o .exe: peca a TI para liberar a pasta C:\CBO\PainelServidor.

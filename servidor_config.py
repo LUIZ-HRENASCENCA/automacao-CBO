@@ -10,7 +10,9 @@ from pathlib import Path
 
 import config
 
-ARQ = Path(__file__).resolve().parent / "servidor_config.json"
+from caminhos import pasta_app
+
+ARQ = pasta_app() / "servidor_config.json"
 # sem caracteres ambiguos (0/O, 1/l/I) para ser facil de digitar
 ALFABETO = "abcdefghjkmnpqrstuvwxyz23456789"
 
