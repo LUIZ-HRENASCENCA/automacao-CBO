@@ -12,6 +12,7 @@ from pathlib import Path
 import porta
 from banco import Banco
 from cliente_rede import Conexao
+import cbo_core
 import cliente_config
 import servidor_config
 from cliente_rede import testar_conexao
@@ -44,6 +45,60 @@ def teste_porta():
     conferir(not porta.avaliar(10, 10, erros_prob)[0], "porta: 5 de 10 com problema nao salva (>=50%)")
     conferir(porta.avaliar(10, 10, erros_prob[:4])[0], "porta: 4 de 10 com problema salva")
     conferir(not porta.avaliar(10, 7, [])[0], "porta: processamento incompleto nao salva")
+
+
+def teste_dialogos():
+    d = cbo_core.decidir_dialogo
+    conferir(d("Existem valores zerados. Deseja salvar mesmo assim?", ["&Sim", "&Não"])[0] == "sim",
+             "salvar: 'valores zerados' -> responde SIM")
+    conferir(d("Existem valores zerados. Deseja salvar mesmo assim?", ["OK"])[0] != "sim",
+             "salvar: sem botao Sim nao responde sim")
+    conferir(d("Deseja apagar o item?", ["&Sim", "&Não"])[0] == "erro",
+             "salvar: pergunta desconhecida -> erro (nao responde)")
+    conferir(d("Conta gravada com sucesso.", ["OK"])[0] == "ok", "salvar: aviso informativo -> OK")
+    conferir(d("Erro de conexao com o banco de dados.", ["OK"])[0] == "erro", "salvar: aviso critico -> erro")
+    conferir(d("Codigo CBO invalido.[2]", ["OK"])[0] == "erro", "salvar: CBO invalido ao salvar -> erro")
+
+
+class WorkerSalvaFalha(WorkerSimulado):
+    nome = "Simulado-falha-ao-salvar"
+    deixa_aberta = True
+
+    def salvar(self, conta, log):
+        raise RuntimeError("O Salux perguntou algo inesperado ao salvar")
+
+
+class WorkerNaoSalvaAberta(WorkerSimulado):
+    nome = "Simulado-nao-salva"
+    deixa_aberta = True
+
+    def salvar(self, conta, log):
+        return False, "modo de teste: conta parcial nao salva"
+
+
+def teste_salvamento_servidor(tmp):
+    for cls, esperado, motivo in ((WorkerSalvaFalha, "FALHA_CRITICA", "falha ao salvar vira FALHA_CRITICA"),
+                                  (WorkerNaoSalvaAberta, "NAO_SALVA", "nao salvou com conta aberta")):
+        b = Banco(tmp / f"fila_{cls.__name__}.db")
+        s = Servidor(b, lambda c=cls: c(velocidade=0.01), bind="127.0.0.1", porta_tcp=8795,
+                     pasta_logs=tmp / "logs_s", token="x")
+        s.iniciar()
+        id_ = b.criar("40111", "tester")
+        esperar(lambda: b.get(id_)["estado"] not in ("ENFILEIRADA", "PROCESSANDO"), 20)
+        time.sleep(0.4)
+        conferir(b.get(id_)["estado"] == esperado and s.pausada, f"servidor: {motivo} e a fila pausa")
+        s.parar()
+        time.sleep(0.3)
+    b = Banco(tmp / "fila_ok.db")  # worker que fecha a conta ao salvar (nao deixa aberta): fila segue
+    s = Servidor(b, lambda: WorkerSimulado(velocidade=0.01), bind="127.0.0.1", porta_tcp=8795,
+                 pasta_logs=tmp / "logs_s2", token="x")
+    s.iniciar()
+    i1, i2 = b.criar("40111", "t"), b.criar("40112", "t")
+    esperar(lambda: all(b.get(i)["estado"] not in ("ENFILEIRADA", "PROCESSANDO") for i in (i1, i2)), 30)
+    conferir(b.get(i1)["estado"] == "SALVA" and b.get(i2)["estado"] == "SALVA" and not s.pausada,
+             "servidor: contas salvas e fechadas -> fila segue sem pausar")
+    s.parar()
+    time.sleep(0.3)
 
 
 def teste_configs(tmp):
@@ -102,12 +157,14 @@ def teste_conexao_e_reconfigurar(srv_a, banco_b, tmp):
 
 def main():
     teste_porta()
+    teste_dialogos()
     tmp = Path(tempfile.mkdtemp(prefix="cbo_teste_"))
     banco = Banco(tmp / "fila.db")
     srv = Servidor(banco, lambda: WorkerSimulado(velocidade=0.01), bind="127.0.0.1", porta_tcp=8799,
                    pasta_logs=tmp / "logs", token=TOKEN)
     conferir(srv.iniciar(), f"servidor iniciou ({srv.erro or 'ok'})")
     teste_configs(tmp)
+    teste_salvamento_servidor(tmp)
     teste_conexao_e_reconfigurar(srv, Banco(tmp / "fila_b.db"), tmp)
     q = queue.Queue()
     cli = Conexao("127.0.0.1", 8799, TOKEN, "tester", "ambos", q)

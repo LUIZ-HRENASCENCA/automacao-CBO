@@ -10,8 +10,9 @@ Interface:
 WorkerSimulado: sem Salux, para testar fila, painéis e logs. O ULTIMO DIGITO da conta escolhe o cenario:
   0 conta nao encontrada | 9 erro critico (queda de conexao) | 8 >=50% de itens com problema
   7 so erros tolerados (campo CBO vazio) - salva | demais: sucesso
-WorkerSalux: usa o Salux de verdade (login, Faturamento, cbo_core.executar). O salvamento ainda
-  NAO esta mapeado: nunca salva, deixa a conta aberta e pausa a fila para revisao.
+WorkerSalux: usa o Salux de verdade (login, Faturamento, cbo_core.executar). Se a porta de
+  salvamento liberar: clica Salvar (responde SIM a "Existem valores zerados...") e fecha a tela da
+  conta. Com "max. itens" definido (teste) nao salva. Se nao salvar, a conta fica aberta e a fila pausa.
 """
 import random
 import threading
@@ -105,7 +106,8 @@ class WorkerSimulado:
 
 class WorkerSalux:
     nome = "Salux real"
-    pausar_apos = True  # sem salvamento mapeado a conta fica aberta: a fila espera voce
+    pausar_apos = False
+    deixa_aberta = True  # se NAO salvar, a conta continua aberta no Salux: o servidor pausa a fila
 
     def __init__(self, limite=None):
         self.limite = limite
@@ -122,13 +124,18 @@ class WorkerSalux:
             r = _vazio("CRITICO", f"Falha ao entrar no Salux: {e}")
             r["tempo"] = _tempo(t0)
             return r
-        res = cbo_core.executar(log, parar, limite=self.limite, conta=conta)
+        res = cbo_core.executar(log, parar, limite=self.limite, conta=conta,
+                                msg_final="o servidor decide agora se salva.")
         alvo = min(res.total, self.limite) if self.limite else res.total
         return {"estado": res.estado, "mensagem": res.mensagem, "total": res.total, "alvo": alvo,
                 "tratados": res.tratados, "preenchidos": res.preenchidos, "ja": res.ja_preenchidos,
                 "erros": list(res.erros), "tempo": res.tempo}
 
     def salvar(self, conta, log):
-        log("aviso", "Salvamento no Salux ainda nao esta mapeado: a conta NAO foi salva e "
-                     "continua aberta para a sua revisao.")
-        return False, "Salvamento no Salux ainda nao implementado (modo de teste)."
+        import cbo_core
+        if self.limite:  # teste com poucos itens: nunca salvar conta parcialmente preenchida
+            log("aviso", f"Modo de teste (max. itens = {self.limite}): conta parcial NAO sera salva; "
+                         "continua aberta no Salux.")
+            return False, f"Modo de teste (max. itens = {self.limite}): conta parcial nao salva."
+        cbo_core.salvar_e_fechar(log)  # ErroCritico se o Salux perguntar algo inesperado
+        return True, ""

@@ -42,7 +42,7 @@ class PainelServidor:
         tk.Label(topo, text="Modo do worker:", bg="#f4f4f4").pack(side="left")
         self.modo = tk.StringVar(value="simulado")
         tk.Radiobutton(topo, text="Simulado", variable=self.modo, value="simulado", bg="#f4f4f4").pack(side="left", padx=6)
-        tk.Radiobutton(topo, text="Salux real (não salva)", variable=self.modo, value="salux", bg="#f4f4f4").pack(side="left")
+        tk.Radiobutton(topo, text="Salux real (salva e fecha a conta)", variable=self.modo, value="salux", bg="#f4f4f4").pack(side="left")
         tk.Label(topo, text="máx. itens:", bg="#f4f4f4").pack(side="left", padx=(12, 2))
         self.v_limite = tk.StringVar()
         tk.Entry(topo, textvariable=self.v_limite, width=4).pack(side="left")

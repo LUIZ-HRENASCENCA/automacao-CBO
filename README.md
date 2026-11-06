@@ -5,7 +5,7 @@ Preenche o campo **CBOS** da aba **Origem** da tela *Manutenção da Conta Pacie
 Existem dois modos de uso:
 
 1. **Modo local (v1.0)** — um painel único que preenche a conta aberta na máquina (`painel_cbo.py`).
-2. **Modo cliente/servidor (branch `dev`)** — um **servidor** com o Salux logado processa uma **fila de contas**; **painéis cliente** (operador e secretárias) enviam contas e recebem o resultado em tempo real. Já funciona completo em **simulação**; com o **Salux real** ainda **não salva** (ver "Estado atual").
+2. **Modo cliente/servidor (branch `dev`)** — um **servidor** com o Salux logado processa uma **fila de contas**; **painéis cliente** (operador e secretárias) enviam contas e recebem o resultado em tempo real. Já funciona completo em **simulação**; com o **Salux real** salva e fecha a conta (implementado, **ainda não validado de ponta a ponta**; ver "Estado atual").
 
 > A automação preenche; **toda conta passa por revisão manual**, mesmo quando salva.
 
@@ -53,7 +53,7 @@ python painel_cliente.py
 
 **Modo do worker** (escolhido no painel do servidor, lido a cada conta):
 - **Simulado** (padrão): sem Salux. O **último dígito da conta** escolhe o cenário: `0` conta não encontrada · `9` erro crítico · `8` 50% ou mais de itens com problema · `7` só erros tolerados · demais: sucesso.
-- **Salux real (não salva)**: faz login (`.env`), abre o Faturamento e processa de verdade. Como o salvamento ainda não está mapeado, **nunca salva**, deixa a conta aberta e **pausa a fila** depois de cada conta: confira/feche a conta no Salux e clique em **Retomar fila**.
+- **Salux real (salva e fecha a conta)**: faz login (`.env`), abre o Faturamento e processa de verdade. Se a **porta de salvamento** liberar, clica em **Salvar**, responde **Sim** ao aviso *"Existem valores zerados. Deseja salvar mesmo assim?"* e **fecha a tela da conta**. Qualquer outra pergunta/aviso do Salux ao salvar é tratado como **erro crítico** (não é respondido). Se **não** salvar (porta barrou, erro, ou *máx. itens* preenchido — modo de teste nunca salva conta parcial), a conta **continua aberta** no Salux e a **fila pausa**: confira/feche a conta e use **Retomar fila**. **Isto grava em produção.**
 
 ### Painel do servidor
 Fila com estados, log ao vivo, clientes conectados. Botões: **Pausar/Retomar fila**, **Parar conta atual**, **Reiniciar fila** (reenfileira todas as contas com falha crítica e retoma). O servidor mostra "PROCESSANDO — NÃO MEXA NA TELA".
@@ -65,6 +65,9 @@ Campo da conta + **Enviar para a fila**, lista da fila, log em tempo real (o mes
 **Conta:** `ENFILEIRADA` · `PROCESSANDO` · `SALVA` · `NAO SALVA` · `CONTA INVALIDA` · `FALHA CRITICA`.
 **Revisão:** `AGUARDANDO REVISAO` (padrão, inclusive nas salvas) · `REVISADA`.
 (Na tela os nomes aparecem sem underline; no banco continuam `NAO_SALVA` etc.)
+
+### Salvamento e fechamento (`cbo_core.salvar_e_fechar`)
+Botão **Salvar** (ícone de check da barra, clique real em `config.POS_BOTAO_SALVAR`) → se aparecer *"Existem valores zerados…"*, clica **Sim** → espera não haver mais avisos → **fecha a tela de Manutenção da Conta** (se o Salux perguntar algo ao fechar, é erro crítico).
 
 ### Porta de salvamento (`porta.py`)
 - **Não salva** se: 50% ou mais dos itens tiverem problema **não tolerado**; processamento incompleto; erro crítico; erro no Salux ou no servidor.
@@ -149,7 +152,7 @@ Teste automático (sem Salux nem interface): `python teste_fluxo_simulado.py` (f
 
 ## Estado atual e limitações
 
-- **Salvar no Salux não está implementado.** Modo Salux real: a conta fica aberta e a fila pausa a cada conta. Falta mapear o botão de salvar e o fechamento da conta (o Salux pergunta algo ao fechar com alterações) para processar várias contas seguidas.
+- **Salvar e fechar:** implementado (botão Salvar da barra + resposta *Sim* ao aviso de valores zerados + fechar a tela da conta), **ainda não validado no Salux real de ponta a ponta**. Quando a conta **não** é salva (porta barrou) ela fica aberta e a fila pausa: **descartar** a conta (responder *Não* ao fechar com alterações) ainda não está mapeado.
 - O **login automático** foi corrigido (posições dos campos) mas **ainda não foi validado de ponta a ponta**.
 - **Prof = 1** ainda não é lido (coluna Prof); por ora, todo CBO sem opção é tolerado.
 - Servidor: token em arquivo (texto) e tráfego **sem TLS** (só rede interna). Antes de produção: usuário dedicado no Salux, sessão do Windows interativa e desbloqueada (logon automático, resolução e escala fixas; não roda como serviço nem com RDP desconectado) e IP fixo para o servidor.

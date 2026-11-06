@@ -391,24 +391,130 @@ def filtrar_procedimentos(app, janela, espera=12):
     return antes, posicao(janela)[1]
 
 
-def fechar_conta(app, janela, espera=15):
+def fechar_conta(app, janela, espera=15, estavel=3.0, tentativas=3):
     """Fecha a janela da conta (WM_CLOSE; nunca o botao 'Fechar Conta', que fecha a conta de faturamento).
 
-    Se o Salux perguntar algo (ex.: salvar alteracoes), NAO responde: levanta ErroCritico.
+    So considera fechada quando a janela fica ausente por `estavel` segundos (apos salvar ela pode
+    reaparecer durante a atualizacao); tenta de novo se voltar. Se o Salux perguntar algo
+    (ex.: salvar alteracoes), NAO responde: levanta ErroCritico.
     """
-    conta = janela_conta(janela)
-    if conta is None:
-        return
-    conta.close()
+    for _ in range(tentativas):
+        conta = janela_conta(janela)
+        if conta is not None:
+            conta.close()
+        fim = time.time() + espera
+        sumiu_desde = None
+        while time.time() < fim:
+            time.sleep(0.5)
+            avisos = ler_avisos(app)
+            if avisos:
+                raise ErroCritico(f"O Salux perguntou algo ao fechar a conta: {avisos[0][0]}")
+            if janela_conta(janela) is None:
+                sumiu_desde = sumiu_desde or time.time()
+                if time.time() - sumiu_desde >= estavel:
+                    return
+            elif sumiu_desde is not None:
+                break  # reapareceu: fecha de novo
+    raise ErroCritico("A tela da conta nao fechou (ou reabriu) apos varias tentativas.")
+
+
+# ---------------------------------------------------------------- salvar e fechar a conta
+
+
+def decidir_dialogo(texto, botoes):
+    """O que fazer com um aviso do Salux durante o SALVAMENTO.
+
+    Devolve ('sim', motivo) so para a pergunta mapeada 'Existem valores zerados. Deseja salvar
+    mesmo assim?'; ('ok', texto) para avisos informativos so com OK; ('erro', motivo) para
+    qualquer outra coisa (a automacao NAO responde perguntas desconhecidas).
+    """
+    t = (texto or "").lower()
+    nomes = [b.replace("&", "").strip().lower() for b in botoes]
+    if "valores zerados" in t and "salvar" in t and "sim" in nomes:
+        return "sim", "valores zerados: salvar mesmo assim"
+    if classificar_aviso(texto) == "critico":
+        return "erro", f"aviso critico do Salux ao salvar: {texto}"
+    if nomes and all(n == "ok" for n in nomes) and classificar_aviso(texto) != "cbo_invalido":
+        return "ok", texto
+    return "erro", f"o Salux perguntou/avisou algo inesperado ao salvar: {texto}"
+
+
+def _dialogo(app):
+    for w in _janelas(app):
+        try:
+            if w.class_name().startswith("#32770") and w.is_visible():
+                return w
+        except Exception:
+            continue
+    return None
+
+
+def salvar_conta(app, janela, log=None, espera=40):
+    """Clica em Salvar (barra de ferramentas) e responde SIM a 'Existem valores zerados...'.
+
+    Qualquer outro aviso/pergunta e ErroCritico (nao e respondido e fica na tela). Termina
+    quando nao aparece mais nenhum aviso por alguns segundos; a confirmacao final de que
+    salvou e o fechamento da conta sem o Salux perguntar nada (ver fechar_conta).
+    """
+    log = log or (lambda nivel, msg: None)
+    if janela_conta(janela) is None:
+        raise ErroCritico("A tela da conta nao esta aberta para salvar.")
+    verificar_salux(app, janela)
+    janela.set_focus()
+    time.sleep(0.4)
+    barra = list(visiveis(janela, "FNFIXEDBAR"))
+    if not barra:
+        raise ErroCritico("Barra de ferramentas do Salux nao encontrada (botao Salvar).")
+    barra[0].click_input(coords=config.POS_BOTAO_SALVAR)  # clique real no check (Salvar)
+    respondeu = False
     fim = time.time() + espera
+    quieto_desde = time.time()
     while time.time() < fim:
-        time.sleep(0.5)
-        avisos = ler_avisos(app)
-        if avisos:
-            raise ErroCritico(f"O Salux perguntou algo ao fechar a conta: {avisos[0][0]}")
-        if janela_conta(janela) is None:
-            return
-    raise ErroCritico("A tela da conta nao fechou.")
+        time.sleep(0.6)
+        verificar_salux(app, janela)
+        d = _dialogo(app)
+        if d is None:
+            if time.time() - quieto_desde >= (3.0 if respondeu else 2.5):
+                return
+            continue
+        quieto_desde = time.time()
+        texto = " ".join(c.window_text().replace("\n", " ") for c in d.children()
+                         if c.class_name() == "Static" and c.window_text().strip())
+        botoes = [c for c in d.children() if c.class_name() == "Button" and c.window_text().strip()]
+        acao, motivo = decidir_dialogo(texto, [b.window_text() for b in botoes])
+        if acao == "erro":
+            raise ErroCritico(motivo)
+        alvo = "sim" if acao == "sim" else "ok"
+        for b in botoes:
+            if b.window_text().replace("&", "").strip().lower() == alvo:
+                log("info" if acao == "ok" else "aviso", f"Aviso do Salux ao salvar: {texto} -> {alvo.upper()}")
+                b.click()
+                respondeu = respondeu or acao == "sim"
+                break
+        else:
+            raise ErroCritico(f"Botao '{alvo}' nao encontrado no aviso do Salux: {texto}")
+        time.sleep(1.0)
+    raise ErroCritico(f"O Salux nao terminou de salvar em {espera}s (aviso pendente ou travado).")
+
+
+def _conectar_salux():
+    try:
+        app = Application(backend=config.BACKEND).connect(path=config.EXE, timeout=5)
+        janela = app.window(title_re=config.TITULO_APP).wrapper_object()
+    except Exception:
+        raise ErroCritico("Salux (faturam.exe) nao encontrado para salvar a conta.")
+    return app, janela
+
+
+def salvar_e_fechar(log):
+    """Salva a conta aberta e fecha a tela de Manutencao da Conta (deixa o Faturamento livre)."""
+    app, janela = _conectar_salux()
+    log("info", "Salvando a conta (botao Salvar)...")
+    salvar_conta(app, janela, log)
+    log("ok", "Conta salva.")
+    time.sleep(2.0)  # deixa o Salux terminar de atualizar a tela antes de fechar
+    fechar_conta(app, janela)
+    log("ok", "Tela da conta fechada.")
 
 
 # ---------------------------------------------------------------- logs em arquivo
@@ -461,14 +567,14 @@ def resumo_contagem(res):
 # ---------------------------------------------------------------- execucao
 
 
-def executar(log, parar=None, limite=None, conta=None):
+def executar(log, parar=None, limite=None, conta=None, msg_final="nada foi salvo; salve manualmente."):
     """Percorre os itens da conta aberta e preenche o CBOS.
 
     log(nivel, msg): nivel em info | ok | aviso | erro | critico.
     parar: threading.Event; se acionado, termina apos a linha atual.
     limite: maximo de itens (None = todos).
     conta: numero da conta a abrir pela consulta do Salux (None = usa a conta ja aberta).
-    Nunca salva e nunca fecha a conta: a revisao e o salvamento sao manuais.
+    Nao salva nem fecha a conta (quem decide e salvar_e_fechar). msg_final: texto ao fim do resumo.
     """
     parar = parar or threading.Event()
     res = Resultado()
@@ -608,6 +714,6 @@ def executar(log, parar=None, limite=None, conta=None):
             gravar_resumos(res)
         except Exception as e:  # nunca esconder o resultado por falha de log
             log("erro", f"Falha ao gravar os logs em texto: {e}")
-    log("info", f"Resumo: {resumo_contagem(res)} - nada foi salvo; salve manualmente.")
+    log("info", f"Resumo: {resumo_contagem(res)}" + (f" - {msg_final}" if msg_final else ""))
     log("info", f"Tempo decorrido: {res.tempo}")
     return res

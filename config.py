@@ -8,6 +8,8 @@ POS_ABA_ITENS = (22, 13)
 POS_ABA_ORIGEM = (132, 13)
 # Botao de consulta (informar/executar) na barra de ferramentas FNFIXEDBAR, relativo ao controle (x, y)
 POS_BOTAO_CONSULTA = (102, 14)
+# Botao Salvar (icone de check) na mesma barra, relativo ao controle (x, y)
+POS_BOTAO_SALVAR = (168, 14)
 # Coluna CBOS na aba Origem: largura (px) do editor da celula (a grade pode estar rolada)
 CBOS_LARGURA = 39
 

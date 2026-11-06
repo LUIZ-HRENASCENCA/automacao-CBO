@@ -69,7 +69,18 @@ class Servidor:
         self.encerrar = True
         self.parar_atual.set()
         if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(self.loop.stop)
+            def _fechar():
+                try:
+                    self.srv.close()  # libera a porta para um novo servidor
+                except Exception:
+                    pass
+                for w in list(self.clientes):
+                    try:
+                        w.close()
+                    except Exception:
+                        pass
+                self.loop.stop()
+            self.loop.call_soon_threadsafe(_fechar)
 
     def pausar(self, valor):
         self.pausada = bool(valor)
@@ -246,7 +257,7 @@ class Servidor:
             log("critico", f"ERRO CRITICO - {msg}")
             res = {"estado": "CRITICO", "mensagem": msg, "total": 0, "alvo": 0, "tratados": 0,
                    "preenchidos": 0, "ja": 0, "erros": [], "tempo": "-"}
-        est, motivo, salvou = res["estado"], res.get("mensagem", ""), False
+        est, motivo, salvou, erro_salvar = res["estado"], res.get("mensagem", ""), False, False
         pausar = bool(getattr(worker, "pausar_apos", False))
         if est in ("CONCLUIDO", "CONCLUIDO_COM_ERROS"):
             ok, motivo, tol, prob = porta.avaliar(res["alvo"], res["tratados"], res["erros"])
@@ -255,10 +266,10 @@ class Servidor:
                 try:
                     salvou, m2 = worker.salvar(conta, log)
                 except Exception as e:
-                    salvou, m2 = False, f"Erro ao salvar: {type(e).__name__}: {e}"
-                    log("critico", m2)
+                    salvou, m2, erro_salvar = False, f"Erro ao salvar: {type(e).__name__}: {e}", True
+                    log("critico", f"ERRO CRITICO - {m2}")
                     pausar = True
-                final = "SALVA" if salvou else "NAO_SALVA"
+                final = "FALHA_CRITICA" if erro_salvar else ("SALVA" if salvou else "NAO_SALVA")
                 if not salvou:
                     motivo = m2
             else:
@@ -270,6 +281,9 @@ class Servidor:
         else:
             final = "FALHA_CRITICA"
             pausar = True
+        if final in ("NAO_SALVA", "FALHA_CRITICA") and getattr(worker, "deixa_aberta", False):
+            pausar = True
+            log("aviso", "A conta NAO foi salva e continua aberta no Salux: confira/feche e retome a fila.")
         resumo = {k: res.get(k) for k in ("total", "alvo", "tratados", "preenchidos", "ja")}
         resumo["erros"] = len(res.get("erros", []))
         resumo["toleradas"] = sum(1 for e in res.get("erros", []) if porta.eh_tolerado(e[1]))

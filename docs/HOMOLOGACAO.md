@@ -43,7 +43,9 @@ python empacotar_cliente.py
 
 Confira também: conta duplicada é recusada; **Marcar como REVISADA** funciona; o log do cliente (`logs_cliente\`) é idêntico ao do servidor (`logs\`); fechar e reabrir o cliente reconecta sozinho.
 
-**Etapa B — Salux real (uma conta).** No servidor marque **"Salux real (não salva)"** e **máx. itens = 5**. Envie **uma** conta de teste (Sit. Cta = Aberta, sem bloqueio de outro usuário). O servidor faz login (`.env`), abre o Faturamento, a conta e o filtro e preenche os CBOs. **Ele não salva**: a conta fica aberta e a fila pausa. Confira a aba Origem, feche a conta no Salux e use **Retomar fila**.
+**Etapa B1 — Salux real, sem salvar (uma conta).** No servidor marque **"Salux real (salva e fecha a conta)"** e preencha **máx. itens = 5**: com limite de itens o servidor **nunca salva** (conta parcial). Envie **uma** conta de teste (Sit. Cta = Aberta, sem bloqueio de outro usuário). O servidor faz login (`.env`), abre o Faturamento, a conta e o filtro e preenche os CBOs; a conta fica aberta e a fila pausa. Confira a aba Origem, feche a conta no Salux e use **Retomar fila**.
+
+**Etapa B2 — Salux real, salvando.** **Somente com uma conta de teste/paciente de teste** (isto grava em produção). Deixe **máx. itens vazio**. O servidor salva, responde *Sim* ao aviso de valores zerados e fecha a tela da conta; a fila segue sozinha. Confira a conta depois no Salux (revisão manual).
 Durante o processamento **não mexa na tela do servidor**.
 
 ## 4. Problemas comuns
@@ -59,6 +61,6 @@ Durante o processamento **não mexa na tela do servidor**.
 | Conta "em uso" no Salux | Bloqueio de concorrência de execução anterior | Fechar a conta no Salux; se persistir, pedir à TI a limpeza do controle de concorrência |
 
 ## 5. Limitações desta homologação
-- O **salvamento no Salux ainda não existe**: em modo real a conta nunca é salva.
+- O **salvamento no Salux foi implementado mas ainda não validado de ponta a ponta**: use só conta de teste na Etapa B2. **Descartar** uma conta não salva (responder *Não* ao fechar) ainda não está mapeado: nesses casos a conta fica aberta e a fila pausa.
 - Token em arquivo (texto) e tráfego **sem criptografia**: apenas rede interna.
 - O servidor exige sessão do Windows interativa e desbloqueada enquanto processa.
